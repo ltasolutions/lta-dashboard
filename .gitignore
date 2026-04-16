@@ -1,0 +1,13 @@
+# Sistema
+*.log
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Backups
+*-backup.html
+*.bak
+
+# Editor
+.vscode/
+*.swp
