@@ -1212,10 +1212,19 @@ const FD=d=>d?d.split('-').reverse().join('/'):'—';
 const norm=s=>(s||'').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9\s]/g,'').trim();
 function normAddr(s){
   var n=normH(s).replace(/[^a-z0-9 ]/g,' ');
-  n=n.replace(/^avenida\s+/,'av ').replace(/^rua\s+/,'r ').replace(/^r \s*/,'r ')
-     .replace(/^alameda\s+/,'al ').replace(/^estrada\s+/,'est ').replace(/^travessa\s+/,'tv ')
-     .replace(/\bno\b/g,'').replace(/\bnr\b/g,'').replace(/\bnum\b/g,'')
-     .replace(/\s{2,}/g,' ').trim();
+  // expande abreviações de logradouro
+  n=n.replace(/\bavenida\b/g,'av').replace(/\brua\b/g,'r').replace(/\balamedas?\b/g,'al')
+     .replace(/\bestrada\b/g,'est').replace(/\btravessa\b/g,'tv').replace(/\bpracas?\b/g,'pc')
+     .replace(/\bviela\b/g,'vi').replace(/\blocal\b/g,'lc');
+  // remove partículas que não ajudam
+  n=n.replace(/\bno\b/g,' ').replace(/\bnr\b/g,' ').replace(/\bnum\b/g,' ')
+     .replace(/\bnumero\b/g,' ').replace(/\bde\b/g,' ').replace(/\bda\b/g,' ')
+     .replace(/\bdo\b/g,' ').replace(/\bdas\b/g,' ').replace(/\bdos\b/g,' ')
+     .replace(/\be\b/g,' ');
+  // remove estado (2 letras sozinhas no final, ex: rj sp mg)
+  n=n.replace(/\b[a-z]{2}\b$/,'');
+  // colapsa espaços
+  n=n.replace(/\s{2,}/g,' ').trim();
   return n;
 }
 const daysSince=dt=>{if(!dt)return Infinity;return Math.floor((Date.now()-new Date(dt).getTime())/86400000);};
@@ -1259,9 +1268,8 @@ function osVinc(o,c){
   if(o.casaId) return Number(o.casaId)===Number(c.id);
   const mr=norm(c.mr),sg=norm(c.sg),cl=norm(o.cliente||'');
   if(cl&&cl.length>2&&(mr.includes(cl)||cl.includes(mr)||sg.includes(cl)||cl.includes(sg)))return true;
-  // Address match usando normAddr + stripPfx (mesma lógica do matchCasa)
-  var enC=normAddr(c.en||''),enO=normAddr(o.en||'');
-  if(_calcOSScore(enO,enC)>=10)return true;
+  var enC=normAddr(c.en||''),enO=normAddr(_cleanAddr(o.en||''));
+  if(_calcOSScore(enO,enC)>=40)return true;
   return false;
 }
 function comp(){
@@ -2104,22 +2112,54 @@ async function executarResetCompleto(){
   location.reload();
 }
 
-function _stripPfx(s){return s.replace(/^(r |av |al |est |tv )/,'');}
-function _calcAddrScore(a,b){
-  if(!a||a.length<4||!b||b.length<4)return 0;
-  var p=a.substring(0,Math.min(22,a.length)),p2=b.substring(0,Math.min(22,b.length));
-  if(b.includes(p)||a.includes(p2))return 22;
-  var ml=Math.min(a.length,b.length),s=0;
-  for(var q=0;q<ml;q++){if(a[q]===b[q])s++;else break;}
-  return s;
+function _stripPfx(s){return s.replace(/^(r |av |al |est |tv |pc |vi |lc )/,'');}
+
+// Extrai o primeiro número de rua encontrado no endereço normalizado
+function _extractStreetNum(s){
+  var m=s.match(/\b(\d{1,5})\b/);
+  return m?m[1]:null;
 }
-function _calcOSScore(enN, cN){
-  if(!enN||enN.length<8||!cN||cN.length<8)return 0;
-  // Tenta com endereços completos E sem prefixo (Rua/Av.) — pega o melhor score
-  return Math.max(
-    _calcAddrScore(enN, cN),
-    _calcAddrScore(_stripPfx(enN), _stripPfx(cN))
-  );
+
+// Remove números do endereço para comparar só o nome da rua
+function _stripNums(s){return s.replace(/\b\d+\b/g,' ').replace(/\s{2,}/g,' ').trim();}
+
+// Tokeniza string em palavras com length > 1
+function _addrTokens(s){return s.split(/\s+/).filter(function(t){return t.length>1;});}
+
+// Jaccard de tokens: |A ∩ B| / |A ∪ B|
+function _tokenJaccard(tA,tB){
+  if(!tA.length||!tB.length)return 0;
+  var setB={};tB.forEach(function(t){setB[t]=1;});
+  var inter=tA.filter(function(t){return setB[t];}).length;
+  var union=new Set(tA.concat(tB)).size;
+  return inter/union;
+}
+
+// Scoring principal: 0-100
+// Regra de ouro: se ambos têm número e são DIFERENTES → 0 (casas distintas na mesma rua)
+function _calcOSScore(enN,cN){
+  if(!enN||enN.length<4||!cN||cN.length<4)return 0;
+
+  var numOS=_extractStreetNum(enN);
+  var numC=_extractStreetNum(cN);
+  // Números diferentes = casas diferentes, sem match
+  if(numOS&&numC&&numOS!==numC)return 0;
+
+  // Compara só o nome (sem número)
+  var nameOS=_stripNums(enN);
+  var nameC=_stripNums(cN);
+
+  // Score base = Jaccard dos tokens do nome
+  var j1=_tokenJaccard(_addrTokens(nameOS),_addrTokens(nameC));
+  // Também tenta sem prefixo de logradouro
+  var j2=_tokenJaccard(_addrTokens(_stripPfx(nameOS)),_addrTokens(_stripPfx(nameC)));
+  var jScore=Math.round(Math.max(j1,j2)*70);
+
+  // Bônus: números presentes e iguais (+25), só um tem número (+5)
+  if(numOS&&numC&&numOS===numC)jScore+=25;
+  else if(numOS||numC)jScore+=5;
+
+  return Math.min(jScore,100);
 }
 function _cleanAddr(s){
   return String(s||'').replace(/,?\s*\d{5}-?\d{3}\s*,?\s*Brazil[^,]*/i,'').replace(/,?\s*Brazil\s*$/i,'').trim();
@@ -2170,7 +2210,7 @@ async function reVincularOS(){
     var enN=_getOSAddr(o);
     if(enN.length<8){semEndereco.push(o);return;}
     var m=_getBestCasa(enN);
-    if(m.score>=10){vinculadas.push({o:o,casaId:m.id});}
+    if(m.score>=40){vinculadas.push({o:o,casaId:m.id});}
     else{pendentes.push({o:o,enN:enN,bestId:m.id,bestScore:m.score,bestCasa:m.casa});}
   });
 
@@ -2189,8 +2229,8 @@ async function reVincularOS(){
 
   // Agrupa pendentes por casaId sugerido para mostrar "prováveis"
   _reVincPendentes=pendentes;
-  var provaveis=pendentes.filter(function(p){return p.bestScore>=5;});
-  var semSugestao=pendentes.filter(function(p){return p.bestScore<5;});
+  var provaveis=pendentes.filter(function(p){return p.bestScore>=20;});
+  var semSugestao=pendentes.filter(function(p){return p.bestScore<20;});
 
   var h='<div style="padding:8px 0">';
   h+='<div style="font-size:15px;font-weight:700;color:#facc15;margin-bottom:14px;text-align:center">🔗 Resultado da Vinculação</div>';
@@ -2242,7 +2282,9 @@ async function reVincularOS(){
 }
 
 async function reVincularOSTodas(){
-  if(!confirm('Varrer TODAS as OS (LTA + FILIAL) e associar às casas por endereço?\n\nIsso pode atualizar centenas de registros no Supabase.'))return;
+  if(!confirm('Varrer TODAS as OS (LTA + FILIAL) e associar às casas por endereço?\n\nIsso vai atualizar centenas de registros no Supabase.'))return;
+  var forcar=confirm('Reprocessar também OS que JÁ têm casa vinculada?\n\nOK = Sim (corrige links errados)\nCancelar = Não (só OS sem vínculo)');
+  // forcar===true: reprocessa tudo; false: só sem casaId
   showLoadingScreen('Carregando todas as OS e Casas...');
   try{
     // Busca todas as OS e todas as casas sem filtro de empresa
@@ -2263,9 +2305,9 @@ async function reVincularOSTodas(){
     var vinculadas=[],jaVinculadas=0,semEndereco=[],pendentes=[];
 
     todasOS.forEach(function(o){
-      if(o.casaId){jaVinculadas++;return;}
+      if(o.casaId&&!forcar){jaVinculadas++;return;}
       var enN=_getOSAddr(o);
-      if(enN.length<8){semEndereco.push(o);return;}
+      if(enN.length<4){semEndereco.push(o);return;}
       // best match entre TODAS as casas
       var best=null,bestScore=0,bestCasa=null;
       todasCS.forEach(function(c){
@@ -2273,7 +2315,9 @@ async function reVincularOSTodas(){
         var s=_calcOSScore(enN,cN);
         if(s>bestScore){bestScore=s;best=c.id;bestCasa=c;}
       });
-      if(bestScore>=10){vinculadas.push({o:o,casaId:best});}
+      // No modo forçado, só atualiza se novo match for melhor que o link atual
+      if(forcar&&o.casaId&&Number(o.casaId)===best&&bestScore>=40){jaVinculadas++;return;}
+      if(bestScore>=40){vinculadas.push({o:o,casaId:best});}
       else{pendentes.push({o:o,enN:enN,bestId:best,bestScore:bestScore,bestCasa:bestCasa});}
     });
 
@@ -2310,7 +2354,7 @@ async function reVincularOSTodas(){
 
     hideLoadingScreen();
 
-    var provaveis=pendentes.filter(function(p){return p.bestScore>=5;});
+    var provaveis=pendentes.filter(function(p){return p.bestScore>=20;});
 
     var h='<div style="padding:8px 0">';
     h+='<div style="font-size:15px;font-weight:700;color:#facc15;margin-bottom:14px;text-align:center">🔗 Re-vincular TODAS — Resultado</div>';
