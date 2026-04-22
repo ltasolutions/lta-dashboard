@@ -1632,6 +1632,94 @@ function cmdVerHistCasa(casaId){
   document.getElementById('modal-wrap').style.display='flex';
 }
 
+function cmdChecarCobertura(){
+  var ativas=cmdActiveCasas();
+  var rows=[];
+
+  ativas.forEach(function(c){
+    var osRel=OSD.filter(function(o){return osVinc(o,c);});
+    var hist1=CMD_HIST[String(c.id)]||{};
+    var hist2=CMD_HIST2[String(c.id)]||{};
+
+    SVCS_LISTA.forEach(function(svcNome,si){
+      var osMatch=osRel.filter(function(o){return cmdSvcMatch(o.sv,svcNome);});
+      var h1=!!hist1[String(si)];
+      var h2=!!hist2[String(si)];
+      var total=Math.min(osMatch.length+( h1?1:0)+(h2?1:0),2);
+      if(total===0)return; // sem registro, ignora
+
+      var osConc=osMatch.filter(function(o){return o.st==='completed';});
+      var osPend=osMatch.filter(function(o){return o.st==='pending';});
+      var osCan=osMatch.filter(function(o){return o.st==='cancelled';});
+      var manuais=(h1?1:0)+(h2?1:0);
+
+      var status='ok';
+      if(osConc.length===0&&manuais===0)status='sem_concluida';
+      else if(osConc.length===0&&manuais>0)status='so_manual';
+      else if(osConc.length>0&&osPend.length>0)status='parcial';
+
+      rows.push({c:c,si:si,svcNome:svcNome,total:total,osConc:osConc,osPend:osPend,osCan:osCan,manuais:manuais,status:status});
+    });
+  });
+
+  var okRows=rows.filter(function(r){return r.status==='ok';});
+  var soManual=rows.filter(function(r){return r.status==='so_manual';});
+  var semConc=rows.filter(function(r){return r.status==='sem_concluida';});
+  var parcial=rows.filter(function(r){return r.status==='parcial';});
+
+  var mb=document.getElementById('modal-body');
+  mb.style.maxWidth='720px';
+
+  function renderRows(list,emptyMsg){
+    if(!list.length)return'<div style="color:#52525b;font-size:12px;padding:8px 0">'+emptyMsg+'</div>';
+    return list.map(function(r){
+      var osNums=r.osConc.concat(r.osPend).map(function(o){return'<span style="font-family:\'DM Mono\',monospace;font-size:10px;color:#22c55e">#'+o.os+'</span>';}).join(' ');
+      var badges='';
+      if(r.osConc.length)badges+='<span style="background:rgba(34,197,94,.15);color:#22c55e;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700">'+r.osConc.length+' concluída'+(r.osConc.length>1?'s':'')+'</span> ';
+      if(r.osPend.length)badges+='<span style="background:rgba(245,158,11,.15);color:#f59e0b;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700">'+r.osPend.length+' pendente'+(r.osPend.length>1?'s':'')+'</span> ';
+      if(r.manuais)badges+='<span style="background:rgba(167,139,250,.12);color:#a78bfa;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700">'+r.manuais+' manual</span>';
+      return'<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:#0f0f11;border:1px solid #27272a;border-radius:7px;margin-bottom:4px;cursor:pointer" onclick="closeModal();cmdVerHistCasa('+r.c.id+')">'
+        +'<div style="min-width:70px;font-size:12px;font-weight:700;color:#e4e4e7">Casa '+r.c.num+'</div>'
+        +'<div style="flex:1;font-size:11px;color:#a1a1aa">'+esc(r.svcNome)+'</div>'
+        +'<div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">'+badges+'</div>'
+        +'</div>';
+    }).join('');
+  }
+
+  var html='<div style="font-size:15px;font-weight:700;color:#fafafa;margin-bottom:4px">🔍 Cobertura de OS por Casa</div>'
+    +'<div style="font-size:11px;color:#71717a;margin-bottom:16px">'+rows.length+' serviço(s) registrado(s) em '+ativas.length+' casas</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:20px">'
+    +'<div style="background:#1c1c1f;border:1px solid #27272a;border-radius:10px;padding:12px;text-align:center"><div style="font-size:22px;font-weight:700;color:#22c55e">'+okRows.length+'</div><div style="font-size:10px;color:#71717a;margin-top:2px">OS concluída ✅</div></div>'
+    +'<div style="background:#1c1c1f;border:1px solid #27272a;border-radius:10px;padding:12px;text-align:center"><div style="font-size:22px;font-weight:700;color:#a78bfa">'+soManual.length+'</div><div style="font-size:10px;color:#71717a;margin-top:2px">Só lançamento manual</div></div>'
+    +'<div style="background:#1c1c1f;border:1px solid #27272a;border-radius:10px;padding:12px;text-align:center"><div style="font-size:22px;font-weight:700;color:#f59e0b">'+parcial.length+'</div><div style="font-size:10px;color:#71717a;margin-top:2px">OS pendente</div></div>'
+    +'<div style="background:#1c1c1f;border:1px solid #27272a;border-radius:10px;padding:12px;text-align:center"><div style="font-size:22px;font-weight:700;color:#f87171">'+semConc.length+'</div><div style="font-size:10px;color:#71717a;margin-top:2px">Sem OS concluída</div></div>'
+    +'</div>';
+
+  if(semConc.length){
+    html+='<div style="font-size:11px;font-weight:700;color:#f87171;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">⚠ Sem OS concluída (contado mas sem finalização)</div>';
+    html+=renderRows(semConc,'');
+    html+='<div style="margin-bottom:14px"></div>';
+  }
+  if(soManual.length){
+    html+='<div style="font-size:11px;font-weight:700;color:#a78bfa;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">📋 Apenas lançamento manual (sem OS real)</div>';
+    html+=renderRows(soManual,'');
+    html+='<div style="margin-bottom:14px"></div>';
+  }
+  if(parcial.length){
+    html+='<div style="font-size:11px;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">⏳ OS pendente (ainda não concluída)</div>';
+    html+=renderRows(parcial,'');
+    html+='<div style="margin-bottom:14px"></div>';
+  }
+  if(okRows.length){
+    html+='<details style="margin-bottom:14px"><summary style="font-size:11px;font-weight:700;color:#22c55e;text-transform:uppercase;letter-spacing:.06em;cursor:pointer;margin-bottom:8px">✅ OS concluída ('+okRows.length+')</summary><div style="margin-top:8px">'+renderRows(okRows,'')+'</div></details>';
+  }
+
+  html+='<button onclick="closeModal()" style="width:100%;background:#27272a;color:#a1a1aa;border:1px solid #3f3f46;border-radius:8px;padding:10px;font-size:13px;cursor:pointer;margin-top:4px">Fechar</button>';
+
+  mb.innerHTML=html;
+  document.getElementById('modal-wrap').style.display='flex';
+}
+
 function rCentroComando(){
   var now=new Date();
   var ym=now.getFullYear()+'-'+(String(now.getMonth()+1).padStart(2,'0'));
@@ -1655,8 +1743,10 @@ function rCentroComando(){
   var html='<div style="margin-bottom:20px">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">'
     +'<h2 style="font-size:18px;font-weight:700;color:#fafafa;margin:0">⚙ Centro de Comando</h2>'
+    +'<div style="display:flex;align-items:center;gap:8px">'
+    +'<button onclick="cmdChecarCobertura()" style="background:rgba(167,139,250,.15);color:#a78bfa;border:1px solid rgba(167,139,250,.3);border-radius:8px;padding:5px 12px;font-size:11px;cursor:pointer;font-family:inherit">🔍 Checar Cobertura</button>'
     +'<span style="font-size:12px;color:#71717a">'+mesAtual+'</span>'
-    +'</div>'
+    +'</div></div>'
     +'<p style="font-size:12px;color:#71717a;margin:0">Roteiro inteligente — '+ativas.length+' casas ativas × '+SVCS_LISTA.length+' serviços / 12 meses'+(CASAS_ARQ.length?' · <span style="color:#f87171">'+CASAS_ARQ.length+' arquivada(s)</span>':'')+'</p>'
     +'</div>';
 
