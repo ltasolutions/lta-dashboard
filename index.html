@@ -1555,14 +1555,20 @@ function cmdVerHistCasa(casaId){
     return (b.dt||b.dt_inicio||'').localeCompare(a.dt||a.dt_inicio||'');
   });
   var histCasa=CMD_HIST[String(casaId)]||{};
+  var histCasa2=CMD_HIST2[String(casaId)]||{};
   var stBg={completed:'rgba(34,197,94,.15)',pending:'rgba(245,158,11,.15)',cancelled:'rgba(248,113,113,.15)'};
   var stCl={completed:'#22c55e',pending:'#f59e0b',cancelled:'#f87171'};
   var stLb={completed:'Pago',pending:'Pendente',cancelled:'Cancelada'};
 
-  var manualEntries=Object.entries(histCasa).filter(function(e){
-    var svcNome=SVCS_LISTA[Number(e[0])];
-    return!osRel.some(function(o){return cmdSvcMatch(o.sv,svcNome);});
+  // Monta lista de registros manuais (CMD_HIST = 1º, CMD_HIST2 = 2º), todos visíveis
+  var manualEntries=[];
+  Object.entries(histCasa).forEach(function(e){
+    manualEntries.push({svcIdx:Number(e[0]),dt:e[1],slot:1});
   });
+  Object.entries(histCasa2).forEach(function(e){
+    manualEntries.push({svcIdx:Number(e[0]),dt:e[1],slot:2});
+  });
+  manualEntries.sort(function(a,b){return b.dt.localeCompare(a.dt);});
 
   var mb=document.getElementById('modal-body');
   mb.style.maxWidth='620px';
@@ -1601,18 +1607,19 @@ function cmdVerHistCasa(casaId){
           +'</div>';
       }).join('');
     }
-    // Manual CMD_HIST entries
+    // Manual CMD_HIST + CMD_HIST2 entries
     if(manualEntries.length>0){
       html+='<div style="font-size:11px;font-weight:700;color:#71717a;text-transform:uppercase;letter-spacing:.07em;margin:14px 0 8px">Registros Manuais</div>';
-      html+=manualEntries.sort(function(a,b){return b[1].localeCompare(a[1]);}).map(function(e){
-        var svcNome=SVCS_LISTA[Number(e[0])];
-        var dt=e[1].split('-').reverse().join('/');
+      html+=manualEntries.map(function(e){
+        var svcNome=SVCS_LISTA[e.svcIdx]||'Serviço '+e.svcIdx;
+        var dt=e.dt.split('-').reverse().join('/');
+        var slotLabel=e.slot===2?'manual 2º':'manual';
         return '<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:#0f0f11;border:1px solid #27272a;border-radius:8px;margin-bottom:6px">'
           +'<div style="flex:1"><span style="font-size:12px;color:#a1a1aa;font-weight:500">'+esc(svcNome)+'</span></div>'
           +'<div style="display:flex;align-items:center;gap:8px">'
           +'<span style="font-size:11px;color:#71717a">'+dt+'</span>'
-          +'<span style="background:rgba(167,139,250,.12);color:#a78bfa;border-radius:5px;padding:1px 6px;font-size:10px;font-weight:700">manual</span>'
-          +'<button onclick="cmdCellClick('+casaId+','+e[0]+')" style="background:none;border:1px solid #3f3f46;border-radius:5px;color:#71717a;cursor:pointer;font-size:11px;padding:2px 6px">✎</button>'
+          +'<span style="background:rgba(167,139,250,.12);color:#a78bfa;border-radius:5px;padding:1px 6px;font-size:10px;font-weight:700">'+slotLabel+'</span>'
+          +'<button onclick="cmdCellClick('+casaId+','+e.svcIdx+')" style="background:none;border:1px solid #3f3f46;border-radius:5px;color:#71717a;cursor:pointer;font-size:11px;padding:2px 6px">✎</button>'
           +'</div></div>';
       }).join('');
     }
