@@ -2627,89 +2627,6 @@ function openEditOS(osNum){
     +'<button onclick="svEditOS(\''+esc(osNum)+'\')" class="bg" style="padding:8px 20px">Salvar</button>'
     +'</div>');
 }
-function diagCasaOS(casaId){
-  var c=CS.find(function(x){return x.id===casaId;});
-  if(!c)return;
-  var enC=normAddr(c.en||'');
-
-  // Monta lista de todas OS com score > 0 para esta casa
-  var candidatas=OSD.map(function(o){
-    var enO=normAddr(_cleanAddr(o.en||''));
-    var score=_calcOSScore(enO,enC);
-    // também verifica nome do cliente
-    var mr=norm(c.mr),sg=norm(c.sg),cl=norm(o.cliente||'');
-    var nomeMatch=cl&&cl.length>2&&(mr.includes(cl)||cl.includes(mr)||sg.includes(cl)||cl.includes(sg));
-    var casaIdMatch=o.casaId&&Number(o.casaId)===Number(c.id);
-    return{o:o,score:score,enO:enO,nomeMatch:nomeMatch,casaIdMatch:casaIdMatch};
-  }).filter(function(x){return x.score>0||x.nomeMatch||x.casaIdMatch;})
-    .sort(function(a,b){
-      var sa=(a.casaIdMatch?1000:0)+a.score+(a.nomeMatch?50:0);
-      var sb=(b.casaIdMatch?1000:0)+b.score+(b.nomeMatch?50:0);
-      return sb-sa;
-    });
-
-  var mb=document.getElementById('modal-body');
-  mb.style.maxWidth='680px';
-
-  var html='<div style="font-size:14px;font-weight:700;color:#fafafa;margin-bottom:4px">🔍 OS candidatas — Casa '+c.num+' '+esc(c.mr)+'</div>'
-    +'<div style="font-size:11px;color:#71717a;margin-bottom:4px">Endereço da casa (normalizado): <span style="font-family:\'DM Mono\',monospace;color:#a1a1aa">'+esc(enC||'—')+'</span></div>'
-    +'<div style="font-size:11px;color:#52525b;margin-bottom:14px">Score ≥ 40 = vinculação automática · Score 20-39 = provável · abaixo = fraco</div>';
-
-  if(!candidatas.length){
-    html+='<div style="text-align:center;padding:28px;color:#52525b">Nenhuma OS com similaridade de endereço encontrada.<br><span style="font-size:11px">Verifique se o endereço da casa está preenchido.</span></div>';
-  } else {
-    html+=candidatas.slice(0,30).map(function(x){
-      var o=x.o;
-      var s=getSC(o.st);
-      var cor=x.casaIdMatch?'#22c55e':x.score>=40?'#4ade80':x.score>=20?'#fb923c':'#52525b';
-      var label=x.casaIdMatch?'✅ vinculada':x.score>=40?'auto ('+x.score+')':x.score>=20?'provável ('+x.score+')':'fraco ('+x.score+')';
-      return '<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 11px;background:#0f0f11;border:1px solid #27272a;border-radius:8px;margin-bottom:5px">'
-        +'<div style="flex:1;min-width:0">'
-          +'<div style="display:flex;align-items:center;gap:7px;margin-bottom:2px">'
-            +'<span style="font-family:\'DM Mono\',monospace;font-weight:700;color:#22c55e;font-size:11px">#'+esc(o.os)+'</span>'
-            +'<span style="font-size:11px;color:#e4e4e7">'+esc(o.sv)+'</span>'
-            +'<span class="bdg '+s.c+'" style="font-size:9px">'+s.l+'</span>'
-            +(x.nomeMatch?'<span style="font-size:9px;background:rgba(96,165,250,.15);color:#60a5fa;border-radius:4px;padding:1px 5px">nome</span>':'')
-          +'</div>'
-          +'<div style="font-size:10px;color:#52525b;font-family:\'DM Mono\',monospace">'+esc(x.enO||'sem endereço')+'</div>'
-          +(o.casaId&&!x.casaIdMatch?'<div style="font-size:10px;color:#f87171;margin-top:1px">⚠ Vinculada à Casa '+o.casaId+'</div>':'')
-        +'</div>'
-        +'<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0">'
-          +'<span style="font-size:11px;font-weight:700;color:'+cor+'">'+label+'</span>'
-          +(!x.casaIdMatch?'<button onclick="vincularOSCasa(\''+esc(o.os)+'\','+casaId+')" style="background:rgba(34,197,94,.15);color:#22c55e;border:1px solid rgba(34,197,94,.3);border-radius:5px;padding:3px 10px;font-size:10px;cursor:pointer">Vincular</button>':'')
-        +'</div>'
-      +'</div>';
-    }).join('');
-    if(candidatas.length>30)html+='<div style="text-align:center;font-size:11px;color:#52525b;padding:8px">... e mais '+(candidatas.length-30)+' OS com score baixo omitidas</div>';
-  }
-
-  html+='<button onclick="closeModal()" style="width:100%;margin-top:12px;background:#27272a;color:#a1a1aa;border:1px solid #3f3f46;border-radius:8px;padding:9px;font-size:13px;cursor:pointer">Fechar</button>';
-  mb.innerHTML=html;
-  document.getElementById('modal-wrap').style.display='flex';
-}
-
-async function vincularOSCasa(osNum,casaId){
-  var o=OSD.find(function(x){return x.os===osNum;});
-  if(!o){alert('OS não encontrada em memória.');return;}
-  o.casaId=casaId;
-  await sbUpsert('ordens_servico',o);
-  // atualiza CMD_HIST se concluída
-  if(o.st==='completed'&&o.dt){
-    var cidStr=String(casaId);
-    if(!CMD_HIST[cidStr])CMD_HIST[cidStr]={};
-    SVCS_LISTA.forEach(function(svc,si){
-      if(cmdSvcMatch(o.sv,svc)){
-        var cur=CMD_HIST[cidStr][String(si)];
-        if(!cur||o.dt>cur){CMD_HIST[cidStr][String(si)]=o.dt;}
-      }
-    });
-    cmdSaveHist();
-  }
-  closeModal();
-  selC(casaId);
-  rOST();rDash();
-}
-
 function svEditOS(osNum){
   var o=OSD.find(function(x){return x.os===osNum;});
   if(!o)return;
@@ -2808,7 +2725,6 @@ function selC(id){
         +'<div style="font-size:20px;font-weight:700;color:#f59e0b">'+R(c.ct)+'</div>'
         +'<div style="font-size:10px;color:#52525b">dia 10</div>'
         +'<button onclick="editCasa('+c.id+')" style="background:rgba(255,255,255,.06);border:1px solid #27272a;border-radius:6px;padding:4px 10px;color:#a1a1aa;cursor:pointer;font-size:11px">✏ Editar</button>'
-        +'<button onclick="diagCasaOS('+c.id+')" style="background:rgba(250,204,21,.1);border:1px solid rgba(250,204,21,.4);border-radius:6px;padding:4px 10px;color:#facc15;cursor:pointer;font-size:11px">🔍 Buscar OS</button>'
       +'</div>'
     +'</div>'
     // ── Inatividade ──
@@ -2834,46 +2750,24 @@ function selC(id){
   // ── Body: 3 columns ──
   +'<div style="display:flex;flex:1;overflow:hidden">'
     // ── Col 1: OS list ──
-    +(function(){
-      var h1c=CMD_HIST[String(c.id)]||{};
-      var h2c=CMD_HIST2[String(c.id)]||{};
-      var manuais=[];
-      Object.entries(h1c).forEach(function(e){manuais.push({svcIdx:Number(e[0]),dt:e[1],slot:1});});
-      Object.entries(h2c).forEach(function(e){manuais.push({svcIdx:Number(e[0]),dt:e[1],slot:2});});
-      manuais.sort(function(a,b){return b.dt.localeCompare(a.dt);});
-      var totalItens=osRel.length+manuais.length;
-      return '<div style="flex:1;overflow:auto;padding:14px 16px;border-right:1px solid #27272a">'
-        +'<div style="font-size:11px;font-weight:700;color:#52525b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">OS Vinculadas</div>'
-        +(totalItens===0
-          ?'<div style="padding:24px;text-align:center;color:#3f3f46;font-size:13px">Nenhuma OS vinculada.<br><span style="font-size:11px;color:#52525b;display:block;margin-top:4px">Atribua uma OS a esta casa no painel de OS.</span></div>'
-          :osRel.map(function(o){
-              var s=getSC(o.st);
-              return '<div onclick="goTabById(\'os\',function(){selOS(\''+o.os+'\');})" style="display:flex;align-items:center;gap:10px;padding:9px 11px;background:#0f0f11;border-radius:8px;border:1px solid #27272a;margin-bottom:6px;cursor:pointer;transition:border-color .15s" onmouseover="this.style.borderColor=\'#3f3f46\'" onmouseout="this.style.borderColor=\'#27272a\'">'
-                +'<div style="width:7px;height:7px;border-radius:50%;background:'+s.d+';flex-shrink:0"></div>'
-                +'<div style="flex:1">'
-                  +'<div style="font-size:12px;font-weight:600;color:#e4e4e7">#'+esc(o.os)+' — '+esc(o.sv)+'</div>'
-                  +'<div style="font-size:10px;color:#52525b;margin-top:1px">'+FD(o.dt)+' · '+esc(o.pb||'')+'</div>'
-                +'</div>'
-                +'<span class="bdg '+s.c+'">'+s.l+'</span>'
-                +'<span style="font-size:11px;font-weight:700;color:'+(o.vl>0?'#22c55e':'#52525b')+';font-family:\'DM Mono\',monospace;flex-shrink:0;margin-left:6px">'+(o.vl>0?R(o.vl):'—')+'</span>'
-              +'</div>';
-            }).join('')
-          +manuais.map(function(e){
-              var svcNome=SVCS_LISTA[e.svcIdx]||'Serviço '+e.svcIdx;
-              var dtFmt=e.dt.split('-').reverse().join('/');
-              var slotLabel=e.slot===2?'manual 2º':'manual';
-              return '<div style="display:flex;align-items:center;gap:10px;padding:9px 11px;background:#0f0f11;border-radius:8px;border:1px solid rgba(167,139,250,.25);margin-bottom:6px">'
-                +'<div style="width:7px;height:7px;border-radius:50%;background:#a78bfa;flex-shrink:0"></div>'
-                +'<div style="flex:1">'
-                  +'<div style="font-size:12px;font-weight:600;color:#e4e4e7">'+esc(svcNome)+'</div>'
-                  +'<div style="font-size:10px;color:#52525b;margin-top:1px">'+dtFmt+'</div>'
-                +'</div>'
-                +'<span style="background:rgba(167,139,250,.12);color:#a78bfa;border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700">'+slotLabel+'</span>'
-              +'</div>';
-            }).join('')
-        )
-      +'</div>';
-    })()
+    +'<div style="flex:1;overflow:auto;padding:14px 16px;border-right:1px solid #27272a">'
+      +'<div style="font-size:11px;font-weight:700;color:#52525b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">OS Vinculadas</div>'
+      +(osRel.length===0
+        ?'<div style="padding:24px;text-align:center;color:#3f3f46;font-size:13px">Nenhuma OS vinculada.<br><span style="font-size:11px;color:#52525b;display:block;margin-top:4px">Atribua uma OS a esta casa no painel de OS.</span></div>'
+        :osRel.map(function(o){
+            var s=getSC(o.st);
+            return '<div onclick="goTabById(\'os\',function(){selOS(\''+o.os+'\');})" style="display:flex;align-items:center;gap:10px;padding:9px 11px;background:#0f0f11;border-radius:8px;border:1px solid #27272a;margin-bottom:6px;cursor:pointer;transition:border-color .15s" onmouseover="this.style.borderColor=\'#3f3f46\'" onmouseout="this.style.borderColor=\'#27272a\'">'
+              +'<div style="width:7px;height:7px;border-radius:50%;background:'+s.d+';flex-shrink:0"></div>'
+              +'<div style="flex:1">'
+                +'<div style="font-size:12px;font-weight:600;color:#e4e4e7">#'+esc(o.os)+' — '+esc(o.sv)+'</div>'
+                +'<div style="font-size:10px;color:#52525b;margin-top:1px">'+FD(o.dt)+' · '+esc(o.pb||'')+'</div>'
+              +'</div>'
+              +'<span class="bdg '+s.c+'">'+s.l+'</span>'
+              +'<span style="font-size:11px;font-weight:700;color:'+(o.vl>0?'#22c55e':'#52525b')+';font-family:\'DM Mono\',monospace;flex-shrink:0;margin-left:6px">'+(o.vl>0?R(o.vl):'—')+'</span>'
+            +'</div>';
+          }).join('')
+      )
+    +'</div>'
     // ── Col 2: Service checklist ──
     +'<div style="width:240px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid #27272a">'
       +'<div style="padding:12px 14px;border-bottom:1px solid #27272a;flex-shrink:0">'
