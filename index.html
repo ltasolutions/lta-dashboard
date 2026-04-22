@@ -2164,48 +2164,63 @@ function _calcOSScore(enN,cN){
 }
 
 // ── Geocodifica o endereço de uma casa via Nominatim (OSM, gratuito) ──────────
+// ── Geocodifica via Nominatim com fallback para proxy CORS ───────────────────
+async function _fetchGeo(endereco){
+  var q=encodeURIComponent(endereco+', Brasil');
+  var urls=[
+    'https://nominatim.openstreetmap.org/search?q='+q+'&format=json&limit=1&countrycodes=br',
+    'https://corsproxy.io/?'+encodeURIComponent('https://nominatim.openstreetmap.org/search?q='+q+'&format=json&limit=1&countrycodes=br')
+  ];
+  for(var i=0;i<urls.length;i++){
+    try{
+      var r=await fetch(urls[i]);
+      if(!r.ok)continue;
+      var d=await r.json();
+      if(d&&d.length&&d[0].lat)return{lat:parseFloat(d[0].lat),lon:parseFloat(d[0].lon)};
+    }catch(e){}
+    await new Promise(function(res){setTimeout(res,400);});
+  }
+  return null;
+}
+
 async function geocodeCasa(casaId){
   var c=CS.find(function(x){return Number(x.id)===Number(casaId);});
   if(!c||!c.en){alert('Casa sem endereço.');return;}
-  try{
-    var q=encodeURIComponent(c.en+', Brasil');
-    var r=await fetch('https://nominatim.openstreetmap.org/search?q='+q+'&format=json&limit=1',{headers:{'Accept-Language':'pt-BR'}});
-    var data=await r.json();
-    if(!data.length){alert('Endereço não encontrado no mapa.\nTente editar o endereço da casa para ser mais preciso.');return;}
-    var lat=parseFloat(data[0].lat),lon=parseFloat(data[0].lon);
-    c.lat=lat;c.lon=lon;
-    await sbUpsert('casas',c);
-    selC(casaId);
-    alert('GPS salvo: '+lat.toFixed(6)+', '+lon.toFixed(6));
-  }catch(e){alert('Erro ao geocodificar: '+e.message);}
+  showLoadingScreen('Buscando GPS da Casa '+c.num+'...');
+  var res=await _fetchGeo(c.en);
+  hideLoadingScreen();
+  if(!res){
+    alert('Endereço não encontrado automaticamente.\n\nPara inserir manualmente:\n1. Abra maps.google.com.br\n2. Busque o endereço\n3. Clique com botão direito no local exato\n4. As coordenadas aparecem no topo do menu\n5. Edite a casa e cole nos campos Lat/Lon');
+    return;
+  }
+  c.lat=res.lat;c.lon=res.lon;
+  await sbUpsert('casas',c);
+  if(sCasa===casaId)selC(casaId);
+  alert('GPS salvo!\nLat: '+res.lat.toFixed(6)+'\nLon: '+res.lon.toFixed(6));
 }
 
-// ── Geocodifica todas as casas sem GPS (batch com delay para respeitar rate limit)
 async function geocodeTodasCasas(){
   var semGPS=CS.filter(function(c){return !c.lat||!c.lon;});
   if(!semGPS.length){alert('Todas as casas já têm coordenadas GPS!');return;}
-  if(!confirm('Geocodificar '+semGPS.length+' casa(s) sem GPS?\n\nIsso vai consultar o OpenStreetMap para cada endereço.\nPode demorar alguns segundos por casa.'))return;
+  if(!confirm('Geocodificar '+semGPS.length+' casa(s) sem GPS?\n\nIsso vai buscar as coordenadas automaticamente.\nPode demorar alguns segundos por casa.'))return;
   showLoadingScreen('Geocodificando casas... 0/'+semGPS.length);
   var ok=0,erros=[];
   for(var i=0;i<semGPS.length;i++){
     var c=semGPS[i];
-    showLoadingScreen('Geocodificando casas... '+(i+1)+'/'+semGPS.length+' — Casa '+c.num+' '+c.mr);
-    try{
-      var q=encodeURIComponent(c.en+', Brasil');
-      var r=await fetch('https://nominatim.openstreetmap.org/search?q='+q+'&format=json&limit=1',{headers:{'Accept-Language':'pt-BR'}});
-      var data=await r.json();
-      if(data.length){
-        c.lat=parseFloat(data[0].lat);c.lon=parseFloat(data[0].lon);
-        await sbUpsert('casas',c);
-        ok++;
-      } else {erros.push('Casa '+c.num+' '+c.mr+' — não encontrada');}
-    }catch(e){erros.push('Casa '+c.num+' '+c.mr+' — erro: '+e.message);}
-    // Rate limit Nominatim: 1 req/s
-    if(i<semGPS.length-1)await new Promise(function(res){setTimeout(res,1100);});
+    showLoadingScreen('Geocodificando... '+(i+1)+'/'+semGPS.length+' — Casa '+c.num+' '+c.mr);
+    var res=await _fetchGeo(c.en);
+    if(res){
+      c.lat=res.lat;c.lon=res.lon;
+      await sbUpsert('casas',c);
+      ok++;
+    } else {
+      erros.push('Casa '+c.num+' — '+c.mr);
+    }
+    if(i<semGPS.length-1)await new Promise(function(res){setTimeout(res,1200);});
   }
   hideLoadingScreen();
   var msg='GPS salvo: '+ok+' de '+semGPS.length+' casas.';
-  if(erros.length)msg+='\n\nNão encontradas:\n'+erros.join('\n');
+  if(erros.length)msg+='\n\nNão encontradas (inserir manualmente):\n'+erros.join('\n');
   alert(msg);
 }
 function _cleanAddr(s){
@@ -3465,6 +3480,8 @@ function openMC(editId){
     <div class="fg" style="grid-column:1/-1"><label>Telefone do Segurado</label><input id="fc-tel" value="${c?esc(c.tel_seg||''):''}" placeholder="(22) 99999-9999"/></div>
     <div class="fg" style="grid-column:1/-1;border-top:1px solid #27272a;padding-top:10px;margin-top:2px"><label style="color:#71717a">Imóvel</label></div>
     <div class="fg" style="grid-column:1/-1"><label>Endereço *</label><input id="fe" value="${c?esc(c.en):''}" placeholder="Rua, nº — Bairro, Cidade"/></div>
+    <div class="fg"><label>Latitude (GPS)</label><input id="fc-lat" type="number" step="any" value="${c&&c.lat?c.lat:''}" placeholder="ex: -22.9068"/></div>
+    <div class="fg"><label>Longitude (GPS)</label><input id="fc-lon" type="number" step="any" value="${c&&c.lon?c.lon:''}" placeholder="ex: -43.1729"/></div>
     <div class="fg"><label>Morador</label><input id="fm" value="${c?esc(c.mr):''}" placeholder="Nome do morador"/></div>
     <div class="fg"><label>Custo Mensal (R$)</label><input id="fcu" type="number" step="0.01" value="${c?c.ct:''}" placeholder="0,00"/></div>
     <div class="fg" style="grid-column:1/-1"><label>Foto da Casa</label>
@@ -3497,12 +3514,14 @@ function svC(){
   var nasc_seg=document.getElementById('fc-nasc').value.trim();
   var tel_seg=document.getElementById('fc-tel').value.trim();
   var editId=document.getElementById('fc-edit-id')?.value;
+  var latVal=parseFloat(document.getElementById('fc-lat').value)||null;
+  var lonVal=parseFloat(document.getElementById('fc-lon').value)||null;
   if(editId){
     var c=CS.find(x=>String(x.id)===editId);
-    if(c){Object.assign(c,{sg,en,mr:document.getElementById('fm').value.trim()||'—',ct:parseFloat(document.getElementById('fcu').value)||0,cpf_seg,nasc_seg,tel_seg});if(_casaFoto)c.foto=_casaFoto;sbUpsert('casas',c);closeModal();rCL();selC(c.id);rDash();}
+    if(c){Object.assign(c,{sg,en,mr:document.getElementById('fm').value.trim()||'—',ct:parseFloat(document.getElementById('fcu').value)||0,cpf_seg,nasc_seg,tel_seg,lat:latVal,lon:lonVal});if(_casaFoto)c.foto=_casaFoto;sbUpsert('casas',c);closeModal();rCL();selC(c.id);rDash();}
     return;
   }
-  var novaCasa={id:Date.now(),num:Math.max(...CS.map(c=>c.num),0)+1,sg,en,mr:document.getElementById('fm').value.trim()||'—',ct:parseFloat(document.getElementById('fcu').value)||0,cpf_seg,nasc_seg,tel_seg,foto:_casaFoto||null};
+  var novaCasa={id:Date.now(),num:Math.max(...CS.map(c=>c.num),0)+1,sg,en,mr:document.getElementById('fm').value.trim()||'—',ct:parseFloat(document.getElementById('fcu').value)||0,cpf_seg,nasc_seg,tel_seg,lat:latVal,lon:lonVal,foto:_casaFoto||null};
   CS.push(novaCasa);sbUpsert('casas',novaCasa);closeModal();
   var ea=document.getElementById('escritorio-app');
   if(ea&&ea.style.display==='flex'){addHistoricoEsc('casa',String(novaCasa.id),'Nova casa: '+sg+' — '+en,novaCasa.ct||0);rEscritorio();}
