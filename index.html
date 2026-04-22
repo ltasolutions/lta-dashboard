@@ -2607,24 +2607,46 @@ function selC(id){
   // ── Body: 3 columns ──
   +'<div style="display:flex;flex:1;overflow:hidden">'
     // ── Col 1: OS list ──
-    +'<div style="flex:1;overflow:auto;padding:14px 16px;border-right:1px solid #27272a">'
-      +'<div style="font-size:11px;font-weight:700;color:#52525b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">OS Vinculadas</div>'
-      +(osRel.length===0
-        ?'<div style="padding:24px;text-align:center;color:#3f3f46;font-size:13px">Nenhuma OS vinculada.<br><span style="font-size:11px;color:#52525b;display:block;margin-top:4px">Atribua uma OS a esta casa no painel de OS.</span></div>'
-        :osRel.map(function(o){
-          var s=getSC(o.st);
-          return '<div onclick="goTabById(\'os\',function(){selOS(\''+o.os+'\');})" style="display:flex;align-items:center;gap:10px;padding:9px 11px;background:#0f0f11;border-radius:8px;border:1px solid #27272a;margin-bottom:6px;cursor:pointer;transition:border-color .15s" onmouseover="this.style.borderColor=\'#3f3f46\'" onmouseout="this.style.borderColor=\'#27272a\'">'
-            +'<div style="width:7px;height:7px;border-radius:50%;background:'+s.d+';flex-shrink:0"></div>'
-            +'<div style="flex:1">'
-              +'<div style="font-size:12px;font-weight:600;color:#e4e4e7">#'+esc(o.os)+' — '+esc(o.sv)+'</div>'
-              +'<div style="font-size:10px;color:#52525b;margin-top:1px">'+FD(o.dt)+' · '+esc(o.pb||'')+'</div>'
-            +'</div>'
-            +'<span class="bdg '+s.c+'">'+s.l+'</span>'
-            +'<span style="font-size:11px;font-weight:700;color:'+(o.vl>0?'#22c55e':'#52525b')+';font-family:\'DM Mono\',monospace;flex-shrink:0;margin-left:6px">'+(o.vl>0?R(o.vl):'—')+'</span>'
-          +'</div>';
-        }).join('')
-      )
-    +'</div>'
+    +(function(){
+      var h1c=CMD_HIST[String(c.id)]||{};
+      var h2c=CMD_HIST2[String(c.id)]||{};
+      var manuais=[];
+      Object.entries(h1c).forEach(function(e){manuais.push({svcIdx:Number(e[0]),dt:e[1],slot:1});});
+      Object.entries(h2c).forEach(function(e){manuais.push({svcIdx:Number(e[0]),dt:e[1],slot:2});});
+      manuais.sort(function(a,b){return b.dt.localeCompare(a.dt);});
+      var totalItens=osRel.length+manuais.length;
+      return '<div style="flex:1;overflow:auto;padding:14px 16px;border-right:1px solid #27272a">'
+        +'<div style="font-size:11px;font-weight:700;color:#52525b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">OS Vinculadas</div>'
+        +(totalItens===0
+          ?'<div style="padding:24px;text-align:center;color:#3f3f46;font-size:13px">Nenhuma OS vinculada.<br><span style="font-size:11px;color:#52525b;display:block;margin-top:4px">Atribua uma OS a esta casa no painel de OS.</span></div>'
+          :osRel.map(function(o){
+              var s=getSC(o.st);
+              return '<div onclick="goTabById(\'os\',function(){selOS(\''+o.os+'\');})" style="display:flex;align-items:center;gap:10px;padding:9px 11px;background:#0f0f11;border-radius:8px;border:1px solid #27272a;margin-bottom:6px;cursor:pointer;transition:border-color .15s" onmouseover="this.style.borderColor=\'#3f3f46\'" onmouseout="this.style.borderColor=\'#27272a\'">'
+                +'<div style="width:7px;height:7px;border-radius:50%;background:'+s.d+';flex-shrink:0"></div>'
+                +'<div style="flex:1">'
+                  +'<div style="font-size:12px;font-weight:600;color:#e4e4e7">#'+esc(o.os)+' — '+esc(o.sv)+'</div>'
+                  +'<div style="font-size:10px;color:#52525b;margin-top:1px">'+FD(o.dt)+' · '+esc(o.pb||'')+'</div>'
+                +'</div>'
+                +'<span class="bdg '+s.c+'">'+s.l+'</span>'
+                +'<span style="font-size:11px;font-weight:700;color:'+(o.vl>0?'#22c55e':'#52525b')+';font-family:\'DM Mono\',monospace;flex-shrink:0;margin-left:6px">'+(o.vl>0?R(o.vl):'—')+'</span>'
+              +'</div>';
+            }).join('')
+          +manuais.map(function(e){
+              var svcNome=SVCS_LISTA[e.svcIdx]||'Serviço '+e.svcIdx;
+              var dtFmt=e.dt.split('-').reverse().join('/');
+              var slotLabel=e.slot===2?'manual 2º':'manual';
+              return '<div style="display:flex;align-items:center;gap:10px;padding:9px 11px;background:#0f0f11;border-radius:8px;border:1px solid rgba(167,139,250,.25);margin-bottom:6px">'
+                +'<div style="width:7px;height:7px;border-radius:50%;background:#a78bfa;flex-shrink:0"></div>'
+                +'<div style="flex:1">'
+                  +'<div style="font-size:12px;font-weight:600;color:#e4e4e7">'+esc(svcNome)+'</div>'
+                  +'<div style="font-size:10px;color:#52525b;margin-top:1px">'+dtFmt+'</div>'
+                +'</div>'
+                +'<span style="background:rgba(167,139,250,.12);color:#a78bfa;border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700">'+slotLabel+'</span>'
+              +'</div>';
+            }).join('')
+        )
+      +'</div>';
+    })()
     // ── Col 2: Service checklist ──
     +'<div style="width:240px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid #27272a">'
       +'<div style="padding:12px 14px;border-bottom:1px solid #27272a;flex-shrink:0">'
