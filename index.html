@@ -381,6 +381,7 @@ function togglePW(){const i=document.getElementById('pw-input'),ic=document.getE
             <button onclick="exportarExcel()" style="background:transparent;border:1px solid #34d399;border-radius:8px;padding:6px 12px;color:#34d399;font-size:11px;cursor:pointer">📊 Excel</button>
             <button onclick="gerarRelatorio()" style="background:transparent;border:1px solid #a78bfa;border-radius:8px;padding:6px 12px;color:#a78bfa;font-size:11px;cursor:pointer">📄 Relatório</button>
             <button onclick="reVincularOS()" style="background:transparent;border:1px solid #facc15;border-radius:8px;padding:6px 12px;color:#facc15;font-size:11px;cursor:pointer">🔗 Re-vincular OS</button>
+            <button onclick="geocodeTodasCasas()" style="background:rgba(56,189,248,.1);border:1px solid #38bdf8;border-radius:8px;padding:6px 12px;color:#38bdf8;font-size:11px;cursor:pointer">📡 GPS Casas</button>
             <button onclick="reVincularOSTodas()" style="background:rgba(250,204,21,.1);border:1px solid #facc15;border-radius:8px;padding:6px 12px;color:#facc15;font-size:11px;cursor:pointer;font-weight:700">🔗 Re-vincular TODAS</button>
             <button onclick="confirmarZerarOS()" style="background:transparent;border:1px solid #f87171;border-radius:8px;padding:6px 12px;color:#f87171;font-size:11px;cursor:pointer">🗑 Zerar OS</button>
             <button onclick="confirmarResetCompleto()" style="background:transparent;border:1px solid #dc2626;border-radius:8px;padding:6px 12px;color:#dc2626;font-size:11px;cursor:pointer;font-weight:700">⚠ Reset Completo</button>
@@ -1266,8 +1267,14 @@ const SVC_MAP={
 
 function osVinc(o,c){
   if(o.casaId) return Number(o.casaId)===Number(c.id);
+  // 1. GPS (método primário — definitivo)
+  var gs=_gpsScore(o.lat,o.lon,c.lat,c.lon);
+  if(gs>=60)return true;   // ≤ 250m = mesma propriedade
+  if(gs===0)return false;  // > 500m = propriedades diferentes com certeza
+  // 2. Nome do cliente (se GPS indisponível)
   const mr=norm(c.mr),sg=norm(c.sg),cl=norm(o.cliente||'');
   if(cl&&cl.length>2&&(mr.includes(cl)||cl.includes(mr)||sg.includes(cl)||cl.includes(sg)))return true;
+  // 3. Texto como fallback (GPS não disponível)
   var enC=normAddr(c.en||''),enO=normAddr(_cleanAddr(o.en||''));
   if(_calcOSScore(enO,enC)>=40)return true;
   return false;
@@ -2113,20 +2120,9 @@ async function executarResetCompleto(){
 }
 
 function _stripPfx(s){return s.replace(/^(r |av |al |est |tv |pc |vi |lc )/,'');}
-
-// Extrai o primeiro número de rua encontrado no endereço normalizado
-function _extractStreetNum(s){
-  var m=s.match(/\b(\d{1,5})\b/);
-  return m?m[1]:null;
-}
-
-// Remove números do endereço para comparar só o nome da rua
+function _extractStreetNum(s){var m=s.match(/\b(\d{1,5})\b/);return m?m[1]:null;}
 function _stripNums(s){return s.replace(/\b\d+\b/g,' ').replace(/\s{2,}/g,' ').trim();}
-
-// Tokeniza string em palavras com length > 1
 function _addrTokens(s){return s.split(/\s+/).filter(function(t){return t.length>1;});}
-
-// Jaccard de tokens: |A ∩ B| / |A ∪ B|
 function _tokenJaccard(tA,tB){
   if(!tA.length||!tB.length)return 0;
   var setB={};tB.forEach(function(t){setB[t]=1;});
@@ -2135,31 +2131,82 @@ function _tokenJaccard(tA,tB){
   return inter/union;
 }
 
-// Scoring principal: 0-100
-// Regra de ouro: se ambos têm número e são DIFERENTES → 0 (casas distintas na mesma rua)
+// ── Haversine: distância em metros entre dois pontos GPS ──────────────────────
+function _haversine(lat1,lon1,lat2,lon2){
+  var R=6371000,dLat=(lat2-lat1)*Math.PI/180,dLon=(lon2-lon1)*Math.PI/180;
+  var a=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)*Math.sin(dLon/2);
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+// ── Score GPS: 100 se ≤ 30m, 80 se ≤ 100m, 60 se ≤ 250m, 0 se > 500m ────────
+function _gpsScore(lat1,lon1,lat2,lon2){
+  if(!lat1||!lon1||!lat2||!lon2)return -1; // -1 = GPS não disponível
+  var d=_haversine(lat1,lon1,lat2,lon2);
+  if(d<=30)return 100;
+  if(d<=100)return 80;
+  if(d<=250)return 60;
+  if(d<=500)return 30;
+  return 0; // > 500m = propriedades diferentes
+}
+
+// ── Score texto: 0-95 (Jaccard + número) — usado como fallback ───────────────
 function _calcOSScore(enN,cN){
   if(!enN||enN.length<4||!cN||cN.length<4)return 0;
-
-  var numOS=_extractStreetNum(enN);
-  var numC=_extractStreetNum(cN);
-  // Números diferentes = casas diferentes, sem match
+  var numOS=_extractStreetNum(enN),numC=_extractStreetNum(cN);
   if(numOS&&numC&&numOS!==numC)return 0;
-
-  // Compara só o nome (sem número)
-  var nameOS=_stripNums(enN);
-  var nameC=_stripNums(cN);
-
-  // Score base = Jaccard dos tokens do nome
+  var nameOS=_stripNums(enN),nameC=_stripNums(cN);
   var j1=_tokenJaccard(_addrTokens(nameOS),_addrTokens(nameC));
-  // Também tenta sem prefixo de logradouro
   var j2=_tokenJaccard(_addrTokens(_stripPfx(nameOS)),_addrTokens(_stripPfx(nameC)));
   var jScore=Math.round(Math.max(j1,j2)*70);
-
-  // Bônus: números presentes e iguais (+25), só um tem número (+5)
   if(numOS&&numC&&numOS===numC)jScore+=25;
   else if(numOS||numC)jScore+=5;
+  return Math.min(jScore,95); // cap 95 para GPS sempre ganhar quando disponível
+}
 
-  return Math.min(jScore,100);
+// ── Geocodifica o endereço de uma casa via Nominatim (OSM, gratuito) ──────────
+async function geocodeCasa(casaId){
+  var c=CS.find(function(x){return Number(x.id)===Number(casaId);});
+  if(!c||!c.en){alert('Casa sem endereço.');return;}
+  try{
+    var q=encodeURIComponent(c.en+', Brasil');
+    var r=await fetch('https://nominatim.openstreetmap.org/search?q='+q+'&format=json&limit=1',{headers:{'Accept-Language':'pt-BR'}});
+    var data=await r.json();
+    if(!data.length){alert('Endereço não encontrado no mapa.\nTente editar o endereço da casa para ser mais preciso.');return;}
+    var lat=parseFloat(data[0].lat),lon=parseFloat(data[0].lon);
+    c.lat=lat;c.lon=lon;
+    await sbUpsert('casas',c);
+    selC(casaId);
+    alert('GPS salvo: '+lat.toFixed(6)+', '+lon.toFixed(6));
+  }catch(e){alert('Erro ao geocodificar: '+e.message);}
+}
+
+// ── Geocodifica todas as casas sem GPS (batch com delay para respeitar rate limit)
+async function geocodeTodasCasas(){
+  var semGPS=CS.filter(function(c){return !c.lat||!c.lon;});
+  if(!semGPS.length){alert('Todas as casas já têm coordenadas GPS!');return;}
+  if(!confirm('Geocodificar '+semGPS.length+' casa(s) sem GPS?\n\nIsso vai consultar o OpenStreetMap para cada endereço.\nPode demorar alguns segundos por casa.'))return;
+  showLoadingScreen('Geocodificando casas... 0/'+semGPS.length);
+  var ok=0,erros=[];
+  for(var i=0;i<semGPS.length;i++){
+    var c=semGPS[i];
+    showLoadingScreen('Geocodificando casas... '+(i+1)+'/'+semGPS.length+' — Casa '+c.num+' '+c.mr);
+    try{
+      var q=encodeURIComponent(c.en+', Brasil');
+      var r=await fetch('https://nominatim.openstreetmap.org/search?q='+q+'&format=json&limit=1',{headers:{'Accept-Language':'pt-BR'}});
+      var data=await r.json();
+      if(data.length){
+        c.lat=parseFloat(data[0].lat);c.lon=parseFloat(data[0].lon);
+        await sbUpsert('casas',c);
+        ok++;
+      } else {erros.push('Casa '+c.num+' '+c.mr+' — não encontrada');}
+    }catch(e){erros.push('Casa '+c.num+' '+c.mr+' — erro: '+e.message);}
+    // Rate limit Nominatim: 1 req/s
+    if(i<semGPS.length-1)await new Promise(function(res){setTimeout(res,1100);});
+  }
+  hideLoadingScreen();
+  var msg='GPS salvo: '+ok+' de '+semGPS.length+' casas.';
+  if(erros.length)msg+='\n\nNão encontradas:\n'+erros.join('\n');
+  alert(msg);
 }
 function _cleanAddr(s){
   return String(s||'').replace(/,?\s*\d{5}-?\d{3}\s*,?\s*Brazil[^,]*/i,'').replace(/,?\s*Brazil\s*$/i,'').trim();
@@ -2168,12 +2215,16 @@ function _getOSAddr(o){
   var en=_cleanAddr(o.en||'');
   return normAddr(en);
 }
-function _getBestCasa(enN){
+function _getBestCasa(enN,oLat,oLon){
   var best=null,bestScore=0,bestCasa=null;
   for(var k=0;k<CS.length;k++){
-    var cN=normAddr(CS[k].en||'');
-    var s=_calcOSScore(enN,cN);
-    if(s>bestScore){bestScore=s;best=CS[k].id;bestCasa=CS[k];}
+    var c=CS[k];
+    var gs=_gpsScore(oLat,oLon,c.lat,c.lon);
+    var s;
+    if(gs>0){s=gs;}                          // GPS disponível: usa distância
+    else if(gs===-1){s=_calcOSScore(enN,normAddr(c.en||''));}  // sem GPS: usa texto
+    else{s=0;}                               // GPS confirmou longe: 0
+    if(s>bestScore){bestScore=s;best=c.id;bestCasa=c;}
   }
   return{id:best,score:bestScore,casa:bestCasa};
 }
@@ -2208,8 +2259,9 @@ async function reVincularOS(){
   OSD.forEach(function(o){
     if(o.casaId){jaVinculadas++;return;}
     var enN=_getOSAddr(o);
-    if(enN.length<8){semEndereco.push(o);return;}
-    var m=_getBestCasa(enN);
+    var hasGPS=!!(o.lat&&o.lon);
+    if(!hasGPS&&enN.length<4){semEndereco.push(o);return;}
+    var m=_getBestCasa(enN,o.lat,o.lon);
     if(m.score>=40){vinculadas.push({o:o,casaId:m.id});}
     else{pendentes.push({o:o,enN:enN,bestId:m.id,bestScore:m.score,bestCasa:m.casa});}
   });
@@ -2307,17 +2359,21 @@ async function reVincularOSTodas(){
     todasOS.forEach(function(o){
       if(o.casaId&&!forcar){jaVinculadas++;return;}
       var enN=_getOSAddr(o);
-      if(enN.length<4){semEndereco.push(o);return;}
-      // best match entre TODAS as casas
+      var hasGPS=!!(o.lat&&o.lon);
+      if(!hasGPS&&enN.length<4){semEndereco.push(o);return;}
+      // best match entre TODAS as casas (GPS prioritário)
       var best=null,bestScore=0,bestCasa=null;
       todasCS.forEach(function(c){
-        var cN=normAddr(c.en||'');
-        var s=_calcOSScore(enN,cN);
+        var gs=_gpsScore(o.lat,o.lon,c.lat,c.lon);
+        var s;
+        if(gs>0){s=gs;}
+        else if(gs===-1){s=_calcOSScore(enN,normAddr(c.en||''));}
+        else{s=0;}
         if(s>bestScore){bestScore=s;best=c.id;bestCasa=c;}
       });
       // No modo forçado, só atualiza se novo match for melhor que o link atual
       if(forcar&&o.casaId&&Number(o.casaId)===best&&bestScore>=40){jaVinculadas++;return;}
-      if(bestScore>=40){vinculadas.push({o:o,casaId:best});}
+      if(bestScore>=40){vinculadas.push({o:o,casaId:best,_gps:hasGPS});}
       else{pendentes.push({o:o,enN:enN,bestId:best,bestScore:bestScore,bestCasa:bestCasa});}
     });
 
@@ -3658,7 +3714,7 @@ function importOrdensServico(rows,header){
   // A=0 Nº OS | C=2 Serviço | D=3 Problema | I=8 Data início
   // U=20 Status | AH=33 Tipo valor | AI=34 Valor/tipo | AJ=35 Valor total
   // AL=37 Endereço | AM=38 Bairro | AN=39 Cidade | AO=40 Estado
-  var COL={OS:0,SV:2,PROB:3,DT:8,ST:20,AH:33,AI:34,AJ:35,EN:37,BAIRRO:38,CI:39,ESTADO:40};
+  var COL={OS:0,SV:2,PROB:3,DT:8,ST:20,AH:33,AI:34,AJ:35,EN:37,BAIRRO:38,CI:39,ESTADO:40,LAT:41,LON:42};
 
   function parseAJ(s){
     var str=String(s||'0').trim();
@@ -3684,15 +3740,19 @@ function importOrdensServico(rows,header){
     return String(s||'').replace(/,?\s*\d{5}-?\d{3}\s*,?\s*Brazil[^,]*/i,'').replace(/,?\s*Brazil\s*$/i,'').trim();
   }
   // normAddr é global (definida acima do importOrdensServico)
-  function matchCasa(en){
-    if(!en||en.length<8)return null;
-    var enN=normAddr(en);
-    if(enN.length<8)return null;
+  function matchCasa(en,lat,lon){
+    var enN=normAddr(en||'');
+    var hasGPS=!!(lat&&lon);
+    if(!hasGPS&&enN.length<4)return null;
     var best=null,bestScore=0;
     for(var k=0;k<CS.length;k++){
-      var cN=normAddr(CS[k].en||'');
-      var s=_calcOSScore(enN,cN); // usa função global com stripPfx incluído
-      if(s>=10&&s>bestScore){bestScore=s;best=CS[k].id;}
+      var c=CS[k];
+      var gs=_gpsScore(lat,lon,c.lat,c.lon);
+      var s;
+      if(gs>0){s=gs;}
+      else if(gs===-1){s=_calcOSScore(enN,normAddr(c.en||''));}
+      else{s=0;}
+      if(s>=40&&s>bestScore){bestScore=s;best=c.id;}
     }
     return best;
   }
@@ -3716,6 +3776,8 @@ function importOrdensServico(rows,header){
         bairro:String(r[COL.BAIRRO]||'').trim(),
         ci:String(r[COL.CI]||'').trim(),
         estado:String(r[COL.ESTADO]||'').trim()||'Rio de Janeiro',
+        lat:parseFloat(r[COL.LAT])||null,
+        lon:parseFloat(r[COL.LON])||null,
         contratante:'',colaborador:'',cliente:'',
         vl:0,tp:{},casaId:null,prestId:null
       };
@@ -3738,7 +3800,7 @@ function importOrdensServico(rows,header){
   var linked=0,cmdUpdated=0,cmdChanged=false;
   osOrder.forEach(function(num){
     var o=osMap[num];
-    var cid=matchCasa(o.en);
+    var cid=matchCasa(o.en,o.lat,o.lon);
     if(cid){o.casaId=cid;linked++;}
     // Se OS finalizada e vinculada a casa: registra no CMD_HIST
     if(o.casaId&&o.st==='completed'&&o.dt){
