@@ -381,6 +381,7 @@ function togglePW(){const i=document.getElementById('pw-input'),ic=document.getE
             <button onclick="exportarExcel()" style="background:transparent;border:1px solid #34d399;border-radius:8px;padding:6px 12px;color:#34d399;font-size:11px;cursor:pointer">📊 Excel</button>
             <button onclick="gerarRelatorio()" style="background:transparent;border:1px solid #a78bfa;border-radius:8px;padding:6px 12px;color:#a78bfa;font-size:11px;cursor:pointer">📄 Relatório</button>
             <button onclick="reVincularOS()" style="background:transparent;border:1px solid #facc15;border-radius:8px;padding:6px 12px;color:#facc15;font-size:11px;cursor:pointer">🔗 Re-vincular OS</button>
+            <button onclick="reVincularOSTodas()" style="background:rgba(250,204,21,.1);border:1px solid #facc15;border-radius:8px;padding:6px 12px;color:#facc15;font-size:11px;cursor:pointer;font-weight:700">🔗 Re-vincular TODAS</button>
             <button onclick="confirmarZerarOS()" style="background:transparent;border:1px solid #f87171;border-radius:8px;padding:6px 12px;color:#f87171;font-size:11px;cursor:pointer">🗑 Zerar OS</button>
             <button onclick="confirmarResetCompleto()" style="background:transparent;border:1px solid #dc2626;border-radius:8px;padding:6px 12px;color:#dc2626;font-size:11px;cursor:pointer;font-weight:700">⚠ Reset Completo</button>
           </div>
@@ -2238,6 +2239,104 @@ async function reVincularOS(){
   h+='</div>';
   openModal(h,700);
   if(vinculadas.length>0){rDash();rFin();rSrv();}
+}
+
+async function reVincularOSTodas(){
+  if(!confirm('Varrer TODAS as OS (LTA + FILIAL) e associar às casas por endereço?\n\nIsso pode atualizar centenas de registros no Supabase.'))return;
+  showLoadingScreen('Carregando todas as OS e Casas...');
+  try{
+    // Busca todas as OS e todas as casas sem filtro de empresa
+    var [rOS,rCS]=await Promise.all([
+      SB.from('ordens_servico').select('*'),
+      SB.from('casas').select('*')
+    ]);
+    if(rOS.error||rCS.error){
+      hideLoadingScreen();
+      alert('Erro ao carregar dados:\n'+(rOS.error?.message||'')+(rCS.error?.message||''));
+      return;
+    }
+    var todasOS=rOS.data||[];
+    var todasCS=rCS.data||[];
+
+    showLoadingScreen('Analisando '+todasOS.length+' OS contra '+todasCS.length+' casas...');
+
+    var vinculadas=[],jaVinculadas=0,semEndereco=[],pendentes=[];
+
+    todasOS.forEach(function(o){
+      if(o.casaId){jaVinculadas++;return;}
+      var enN=_getOSAddr(o);
+      if(enN.length<8){semEndereco.push(o);return;}
+      // best match entre TODAS as casas
+      var best=null,bestScore=0,bestCasa=null;
+      todasCS.forEach(function(c){
+        var cN=normAddr(c.en||'');
+        var s=_calcOSScore(enN,cN);
+        if(s>bestScore){bestScore=s;best=c.id;bestCasa=c;}
+      });
+      if(bestScore>=10){vinculadas.push({o:o,casaId:best});}
+      else{pendentes.push({o:o,enN:enN,bestId:best,bestScore:bestScore,bestCasa:bestCasa});}
+    });
+
+    // Aplica vínculos direto no Supabase (sem passar por sbUpsert para não filtrar por empresa)
+    var alteradas=vinculadas.map(function(x){x.o.casaId=x.casaId;return x.o;});
+    if(alteradas.length){
+      var chunkSize=100;
+      for(var i=0;i<alteradas.length;i+=chunkSize){
+        await SB.from('ordens_servico').upsert(alteradas.slice(i,i+chunkSize));
+      }
+    }
+
+    // Atualiza OSD em memória para as OS da empresa ativa
+    alteradas.forEach(function(o){
+      var local=OSD.find(function(x){return x.os===o.os;});
+      if(local)local.casaId=o.casaId;
+    });
+
+    // Atualiza CMD_HIST para OS concluídas que agora têm casaId
+    var cmdChanged=false;
+    alteradas.forEach(function(o){
+      if(o.casaId&&o.st==='completed'&&o.dt){
+        var cidStr=String(o.casaId);
+        if(!CMD_HIST[cidStr])CMD_HIST[cidStr]={};
+        SVCS_LISTA.forEach(function(svc,si){
+          if(cmdSvcMatch(o.sv,svc)){
+            var cur=CMD_HIST[cidStr][String(si)];
+            if(!cur||o.dt>cur){CMD_HIST[cidStr][String(si)]=o.dt;cmdChanged=true;}
+          }
+        });
+      }
+    });
+    if(cmdChanged)cmdSaveHist();
+
+    hideLoadingScreen();
+
+    var provaveis=pendentes.filter(function(p){return p.bestScore>=5;});
+
+    var h='<div style="padding:8px 0">';
+    h+='<div style="font-size:15px;font-weight:700;color:#facc15;margin-bottom:14px;text-align:center">🔗 Re-vincular TODAS — Resultado</div>';
+    h+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px;text-align:center">';
+    h+='<div style="background:#18181b;border:1px solid #27272a;border-radius:8px;padding:10px"><div style="font-size:22px;font-weight:700;color:#4ade80">'+vinculadas.length+'</div><div style="font-size:11px;color:#71717a">Vinculadas</div></div>';
+    h+='<div style="background:#18181b;border:1px solid #27272a;border-radius:8px;padding:10px"><div style="font-size:22px;font-weight:700;color:#60a5fa">'+jaVinculadas+'</div><div style="font-size:11px;color:#71717a">Já vinculadas</div></div>';
+    h+='<div style="background:#18181b;border:1px solid #27272a;border-radius:8px;padding:10px"><div style="font-size:22px;font-weight:700;color:#f87171">'+pendentes.length+'</div><div style="font-size:11px;color:#71717a">Sem match</div></div>';
+    h+='</div>';
+    if(provaveis.length){
+      h+='<div style="font-size:12px;color:#fb923c;margin-bottom:6px">⚠ '+provaveis.length+' OS com score baixo (endereços parcialmente similares) — verifique manualmente se necessário.</div>';
+      h+='<div style="max-height:160px;overflow-y:auto;font-size:10px;color:#71717a;display:flex;flex-direction:column;gap:3px">';
+      provaveis.forEach(function(p){
+        h+='<div>OS '+p.o.os+' — <span style="color:#a1a1aa">'+p.enN+'</span> → sugestão: '+(p.bestCasa?p.bestCasa.mr:'?')+' (score '+p.bestScore+')</div>';
+      });
+      h+='</div>';
+    }
+    if(semEndereco.length){h+='<div style="font-size:11px;color:#52525b;margin-top:8px">'+semEndereco.length+' OS sem endereço (campo en vazio).</div>';}
+    h+='<div style="text-align:center;margin-top:16px"><button onclick="closeModal();rOST();if(sCasa)selC(sCasa);rCentroComando();" style="background:#facc15;color:#000;border:none;border-radius:8px;padding:9px 24px;font-size:13px;font-weight:700;cursor:pointer">Fechar e Atualizar</button></div>';
+    h+='</div>';
+    openModal(h,640);
+    if(vinculadas.length){rDash();rFin();rSrv();}
+  }catch(e){
+    hideLoadingScreen();
+    alert('Erro inesperado: '+e.message);
+    console.error(e);
+  }
 }
 
 async function reVincForcar(idxList){
