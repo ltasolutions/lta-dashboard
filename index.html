@@ -2270,9 +2270,10 @@ var _reVincPendentes=[]; // OS sem match guardadas para vínculo manual
 async function resetarVinculosCasas(){
   var total=OSD.filter(function(o){return o.casaId!=null;}).length;
   if(!total){alert('Nenhuma OS vinculada a uma casa para resetar.');return;}
-  if(!confirm('Remover vínculo de casa em '+total+' OS da empresa '+_empresa+'?\n\nAs OS continuam existindo — apenas o campo casaId será zerado.\nUse "Re-vincular TODAS" depois para re-associar.'))return;
+  if(!confirm('Remover vínculo de casa em '+total+' OS da empresa '+_empresa+'?\n\nOs históricos manuais do Centro de Comando também serão zerados.\nUse "Re-vincular TODAS" depois para re-associar pelo GPS.'))return;
   showLoadingScreen('Zerando vínculos de casas...');
   try{
+    // Zera casaId no Supabase
     var ids=OSD.filter(function(o){return o.casaId!=null;}).map(function(o){return o.os;});
     var chunkSize=100;
     for(var i=0;i<ids.length;i+=chunkSize){
@@ -2281,9 +2282,15 @@ async function resetarVinculosCasas(){
       if(error){hideLoadingScreen();alert('Erro ao zerar vínculos:\n'+error.message);return;}
     }
     OSD.forEach(function(o){o.casaId=null;});
+    // Limpa históricos manuais do Centro de Comando (CMD_HIST e CMD_HIST2)
+    Object.keys(CMD_HIST).forEach(function(k){delete CMD_HIST[k];});
+    Object.keys(CMD_HIST2).forEach(function(k){delete CMD_HIST2[k];});
+    cmdSaveHist();
+    cmdSaveHist2();
     hideLoadingScreen();
-    alert('✓ '+total+' OS desvinculadas de casas.\nAgora use "Re-vincular TODAS" para re-associar pelo GPS.');
+    alert('✓ '+total+' OS desvinculadas e históricos manuais zerados.\nAgora use "Re-vincular TODAS" para re-associar pelo GPS.');
     rOST();rDash();
+    if(document.getElementById('tab-comando')&&document.getElementById('tab-comando').classList.contains('active'))rCentroComando();
   }catch(e){hideLoadingScreen();alert('Erro: '+e.message);}
 }
 
