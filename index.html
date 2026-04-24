@@ -1402,7 +1402,7 @@ function cmdSvcMatch(oSV,svcName){
 function cmdGetServiceOrder(casaId){
   var c=CS.find(function(x){return Number(x.id)===Number(casaId);});
   if(!c)return[];
-  var osRel=OSD.filter(function(o){return osVinc(o,c);});
+  var osRel=OSD.filter(function(o){return Number(o.casaId)===Number(casaId);});
   var histCasa=CMD_HIST[String(casaId)]||{};
   return SVCS_LISTA.map(function(svc,si){
     var matching=osRel.filter(function(o){return cmdSvcMatch(o.sv,svc);});
@@ -1427,7 +1427,7 @@ function cmdGetSuggestion(casaId){
   var ym=now.getFullYear()+'-'+(String(now.getMonth()+1).padStart(2,'0'));
   var c=CS.find(function(x){return Number(x.id)===Number(casaId);});
   if(!c)return{suggestion:null,donethis:[],order:[]};
-  var osRel=OSD.filter(function(o){return osVinc(o,c);});
+  var osRel=OSD.filter(function(o){return Number(o.casaId)===Number(casaId);});
   var donethis=osRel.filter(function(o){return(o.dt||o.dt_inicio||'').startsWith(ym);});
   // Also check manual history for this month
   var histCasa=CMD_HIST[String(casaId)]||{};
@@ -1448,7 +1448,7 @@ function cmdGetCount(casaId,svcIdx){
   var svcNome=SVCS_LISTA[svcIdx];
   var c=CS.find(function(x){return Number(x.id)===Number(casaId);});
   if(!c)return 0;
-  var osCount=OSD.filter(function(o){return osVinc(o,c)&&cmdSvcMatch(o.sv,svcNome);}).length;
+  var osCount=OSD.filter(function(o){return Number(o.casaId)===Number(casaId)&&cmdSvcMatch(o.sv,svcNome);}).length;
   var h1=(CMD_HIST[String(casaId)]&&CMD_HIST[String(casaId)][String(svcIdx)])?1:0;
   var h2=(CMD_HIST2[String(casaId)]&&CMD_HIST2[String(casaId)][String(svcIdx)])?1:0;
   return Math.min(osCount+h1+h2,2);
@@ -2283,8 +2283,7 @@ async function resetarVinculosCasas(){
     cmdSaveHist2();
     hideLoadingScreen();
     alert('✓ casaId zerado em todas as OS e históricos manuais limpos.\nAgora use "Re-vincular TODAS" para re-associar pelo GPS.');
-    rOST();rDash();
-    if(document.getElementById('tab-comando')&&document.getElementById('tab-comando').classList.contains('active'))rCentroComando();
+    rOST();rDash();rCentroComando();
   }catch(e){hideLoadingScreen();alert('Erro: '+e.message);}
 }
 
