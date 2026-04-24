@@ -1041,7 +1041,14 @@ async function loadData(){
     // Diagnóstico: se qualquer tabela principal retornou erro RLS, mostra aviso
     if(ros.error){_sbStats.erro='ordens_servico: '+ros.error.message;console.warn('loadData ros error',ros.error);}
     if(rcs.error){_sbStats.erro+=' | casas: '+rcs.error.message;console.warn('loadData rcs error',rcs.error);}
-    if(ros.data&&ros.data.length>0){OSD.length=0;OSD.push(...ros.data);_sbStats.os=ros.data.length;_sbStats.fromSB=true;}
+    if(ros.data&&ros.data.length>0){
+      OSD.length=0;OSD.push(...ros.data);_sbStats.os=ros.data.length;_sbStats.fromSB=true;
+      // Normaliza vl e tp para números (Supabase pode retornar strings)
+      OSD.forEach(function(o){
+        o.vl=parseFloat(o.vl)||0;
+        if(o.tp&&typeof o.tp==='object')Object.keys(o.tp).forEach(function(k){o.tp[k]=parseFloat(o.tp[k])||0;});
+      });
+    }
     else if(OSD.length>0){var _r=await SB.from('ordens_servico').upsert(_inj(OSD),{onConflict:'os'});if(_r&&_r.error)console.warn('seed OSD',_r.error);}
     if(rcs.data&&rcs.data.length>0){
       _sbStats.cs=rcs.data.length;_sbStats.fromSB=true;
@@ -1282,12 +1289,13 @@ function osVinc(o,c){
 }
 function comp(){
   const ok=OSD.filter(o=>o.st==='completed');
-  const tot=ok.reduce((s,o)=>s+o.vl,0);
+  const tot=ok.reduce((s,o)=>s+(parseFloat(o.vl)||0),0);
   const bS={},bC={},bT={};
   ok.forEach(o=>{
-    if(!bS[o.sv])bS[o.sv]={t:0,n:0};bS[o.sv].t+=o.vl;bS[o.sv].n++;
-    if(!bC[o.ci])bC[o.ci]={t:0,n:0};bC[o.ci].t+=o.vl;bC[o.ci].n++;
-    Object.entries(o.tp||{}).forEach(([k,v])=>{if(v>=20){if(!bT[k])bT[k]=0;bT[k]+=v;}});
+    var vl=parseFloat(o.vl)||0;
+    if(!bS[o.sv])bS[o.sv]={t:0,n:0};bS[o.sv].t+=vl;bS[o.sv].n++;
+    if(!bC[o.ci])bC[o.ci]={t:0,n:0};bC[o.ci].t+=vl;bC[o.ci].n++;
+    Object.entries(o.tp||{}).forEach(([k,v])=>{var vn=parseFloat(v)||0;if(vn>=20){if(!bT[k])bT[k]=0;bT[k]+=vn;}});
   });
   return{tot,ok,bS,bC,bT};
 }
@@ -1571,7 +1579,7 @@ function cmdSvOS(casaId,svcIdx){
 function cmdVerHistCasa(casaId){
   var c=CS.find(function(x){return Number(x.id)===Number(casaId);});
   if(!c)return;
-  var osRel=OSD.filter(function(o){return osVinc(o,c);}).slice().sort(function(a,b){
+  var osRel=OSD.filter(function(o){return Number(o.casaId)===Number(casaId);}).slice().sort(function(a,b){
     return (b.dt||b.dt_inicio||'').localeCompare(a.dt||a.dt_inicio||'');
   });
   var histCasa=CMD_HIST[String(casaId)]||{};
@@ -1657,7 +1665,7 @@ function cmdChecarCobertura(){
   var rows=[];
 
   ativas.forEach(function(c){
-    var osRel=OSD.filter(function(o){return osVinc(o,c);});
+    var osRel=OSD.filter(function(o){return Number(o.casaId)===Number(c.id);});
     var hist1=CMD_HIST[String(c.id)]||{};
     var hist2=CMD_HIST2[String(c.id)]||{};
 
@@ -1803,7 +1811,7 @@ function rCentroComando(){
 
   var ativasSort=sortCasas(ativas,_cmdSort);
   var casasOK=ativas.filter(function(c){
-    return OSD.filter(function(o){return osVinc(o,c);}).some(function(o){return(o.dt||o.dt_inicio||'').startsWith(ym);});
+    return OSD.filter(function(o){return Number(o.casaId)===Number(c.id);}).some(function(o){return(o.dt||o.dt_inicio||'').startsWith(ym);});
   }).length;
   var casasPend=ativas.length-casasOK;
 
@@ -2593,7 +2601,7 @@ function rOST(){
   else if(banner){banner.style.display='none';}
   const fin=OSD.filter(o=>o.st==='completed');
   document.getElementById('ostats').innerHTML=[
-    {v:R(fin.reduce((s,o)=>s+o.vl,0)),l:"Receita Total",c:"#22c55e"},{v:fin.length,l:"Finalizadas",c:"#22c55e"},
+    {v:R(fin.reduce((s,o)=>s+(parseFloat(o.vl)||0),0)),l:"Receita Total",c:"#22c55e"},{v:fin.length,l:"Finalizadas",c:"#22c55e"},
     {v:OSD.filter(o=>o.st==='cancelled').length,l:"Canceladas",c:"#f87171"},{v:OSD.length,l:"Total OS",c:"#a1a1aa"},
   ].map(s=>`<div class="sm"><div style="font-size:18px;font-weight:700;color:${s.c}">${s.v}</div><div style="font-size:11px;color:#52525b;margin-top:2px">${s.l}</div></div>`).join('');
   var escOSSet=new Set(HISTORICO_ESC.filter(function(h){return h.tipo==='os';}).map(function(h){return h.ref_id;}));
@@ -2844,11 +2852,11 @@ function selC(id){
   sCasa=id;var c=CS.find(function(x){return x.id===id;});
   var osRel=OSD.filter(function(o){return Number(o.casaId)===Number(id);});
   var osOk=osRel.filter(function(o){return o.st==='completed';});
-  var totRec=osOk.reduce(function(s,o){return s+o.vl;},0);
+  var totRec=osOk.reduce(function(s,o){return s+(parseFloat(o.vl)||0);},0);
   var ultima=osOk.slice().sort(function(a,b){return new Date(b.dt)-new Date(a.dt);})[0];
   var dias=ultima?daysSince(ultima.dt):999;
   var corD=dias>60?'#f87171':dias>30?'#f59e0b':dias>14?'#facc15':'#22c55e';
-  var bySrv={};osOk.forEach(function(o){if(!bySrv[o.sv])bySrv[o.sv]={n:0,t:0};bySrv[o.sv].n++;bySrv[o.sv].t+=o.vl;});
+  var bySrv={};osOk.forEach(function(o){if(!bySrv[o.sv])bySrv[o.sv]={n:0,t:0};bySrv[o.sv].n++;bySrv[o.sv].t+=(parseFloat(o.vl)||0);});
 
   // Service checklist: merge OS data + CMD_HIST manual entries
   var histCasa=CMD_HIST[String(c.id)]||{};
@@ -3315,7 +3323,7 @@ function rRenderProvCards(){
   el.innerHTML=PROVS.map(function(p,i){
     var osAtrib=OSD.filter(function(o){return o.prestId===p.id&&o.st==='completed';});
     var osPago=OSD.filter(function(o){return o.prestId===p.id&&o.st==='pago';});
-    var vlPend=osAtrib.reduce(function(s,o){return s+o.vl;},0);
+    var vlPend=osAtrib.reduce(function(s,o){return s+(parseFloat(o.vl)||0);},0);
     return '<div style="background:#18181b;border:1px solid #27272a;border-radius:14px;padding:20px;transition:all .2s" onmouseover="this.style.borderColor=\'rgba(255,255,255,.1)\'" onmouseout="this.style.borderColor=\'#27272a\'">'
       +'<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">'
         +'<div style="width:44px;height:44px;border-radius:50%;background:hsl('+(140+i*40)+',50%,28%);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:#fff;flex-shrink:0">'+esc(p.nome[0])+'</div>'
@@ -3450,7 +3458,7 @@ function rPrestApp(){
           +'</div>'
           +'<span class="bdg '+s.c+'">'+s.l+'</span>'
         +'</div>'
-        +(o.vl?'<div style="margin-top:10px;font-size:13px;font-weight:700;color:#22c55e">R$ '+o.vl.toFixed(2).replace('.',',')+'</div>':'')
+        +(o.vl?'<div style="margin-top:10px;font-size:13px;font-weight:700;color:#22c55e">R$ '+(parseFloat(o.vl)||0).toFixed(2).replace('.',',')+'</div>':'')
         +(o.conclusao?'<div style="margin-top:6px;font-size:11px;color:#71717a;background:#0f0f11;border-radius:6px;padding:6px 10px">'+esc(o.conclusao)+'</div>':'')
       +'</div>';
     }).join('');
@@ -3716,15 +3724,15 @@ function gerarRelatorio(){
   var finalizadas=OSD.filter(function(o){return o.st==='completed';});
   var canceladas=OSD.filter(function(o){return o.st==='cancelled';});
   var pendentes=OSD.filter(function(o){return o.st==='pending';});
-  var totalRec=finalizadas.reduce(function(s,o){return s+o.vl;},0);
-  var totalCusto=CUSTOS.reduce(function(s,c){return s+c.valor;},0);
+  var totalRec=finalizadas.reduce(function(s,o){return s+(parseFloat(o.vl)||0);},0);
+  var totalCusto=CUSTOS.reduce(function(s,c){return s+(parseFloat(c.valor)||0);},0);
   // receita por serviço
-  var bySv={};finalizadas.forEach(function(o){bySv[o.sv]=(bySv[o.sv]||0)+o.vl;});
+  var bySv={};finalizadas.forEach(function(o){bySv[o.sv]=(bySv[o.sv]||0)+(parseFloat(o.vl)||0);});
   var topSv=Object.entries(bySv).sort(function(a,b){return b[1]-a[1];}).slice(0,10);
   var svRows=topSv.map(function(e,i){return '<tr style="border-bottom:1px solid #eee"><td style="padding:6px 10px">'+(i+1)+'</td><td style="padding:6px 10px">'+e[0]+'</td><td style="padding:6px 10px;text-align:right;font-weight:700;color:#16a34a">R$ '+e[1].toFixed(2).replace('.',',')+'</td></tr>';}).join('');
   // OS recentes
   var recentes=finalizadas.slice(-10).reverse();
-  var osRows=recentes.map(function(o){return '<tr style="border-bottom:1px solid #eee"><td style="padding:6px 10px;color:#16a34a;font-weight:600">#'+o.os+'</td><td style="padding:6px 10px">'+o.sv+'</td><td style="padding:6px 10px">'+o.ci+'</td><td style="padding:6px 10px;text-align:right">R$ '+o.vl.toFixed(2).replace('.',',')+'</td></tr>';}).join('');
+  var osRows=recentes.map(function(o){return '<tr style="border-bottom:1px solid #eee"><td style="padding:6px 10px;color:#16a34a;font-weight:600">#'+o.os+'</td><td style="padding:6px 10px">'+o.sv+'</td><td style="padding:6px 10px">'+o.ci+'</td><td style="padding:6px 10px;text-align:right">R$ '+(parseFloat(o.vl)||0).toFixed(2).replace('.',',')+'</td></tr>';}).join('');
   var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Relatório — LTA Solutions</title>'
     +'<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;color:#111;padding:36px;font-size:13px}'
     +'.hdr{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:16px;border-bottom:2px solid #16a34a;margin-bottom:24px}'
@@ -5046,7 +5054,7 @@ function rEscReceitaChart(){
   }
   var dados=meses.map(function(ym){
     return OSD.filter(function(o){return o.st==='completed'&&o.dt&&o.dt.substring(0,7)===ym;})
-      .reduce(function(s,o){return s+(o.vl||0);},0);
+      .reduce(function(s,o){return s+(parseFloat(o.vl)||0);},0);
   });
   var maxVal=Math.max.apply(null,dados);
   if(!maxVal||maxVal<=0)maxVal=1;
@@ -5274,7 +5282,7 @@ function escGerarRecibo(){
   if(rProvEl)rProvEl.value=sel.value;
   if(rNumEl)rNumEl.value=document.getElementById('er-num').value;
   var recNum=document.getElementById('er-num')?document.getElementById('er-num').value:'';
-  var recTotal=escRecItems.reduce(function(s,i){return s+(i.vl||0);},0);
+  var recTotal=escRecItems.reduce(function(s,i){return s+(parseFloat(i.vl)||0);},0);
   rGerarRecibo();
   rItems.length=0;
   savedItems.forEach(function(i){rItems.push(i);});
