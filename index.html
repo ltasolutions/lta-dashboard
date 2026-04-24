@@ -1027,13 +1027,13 @@ async function loadData(){
   var _sbStats={os:0,cs:0,provs:0,tabsrv:0,fromSB:false,erro:''};
   try{
     var res=await _t(Promise.all([
-      SB.from('ordens_servico').select('*').eq('empresa',_empresa),
-      SB.from('casas').select('*').eq('empresa',_empresa),
-      SB.from('prestadores').select('*').eq('empresa',_empresa),
-      SB.from('tabela_servicos').select('*').eq('empresa',_empresa),
-      SB.from('recibos').select('*').eq('empresa',_empresa),
-      SB.from('alertas').select('*').eq('empresa',_empresa),
-      SB.from('custos').select('*').eq('empresa',_empresa)
+      SB.from('ordens_servico').select('*').eq('empresa',_empresa).limit(10000),
+      SB.from('casas').select('*').eq('empresa',_empresa).limit(10000),
+      SB.from('prestadores').select('*').eq('empresa',_empresa).limit(10000),
+      SB.from('tabela_servicos').select('*').eq('empresa',_empresa).limit(10000),
+      SB.from('recibos').select('*').eq('empresa',_empresa).limit(10000),
+      SB.from('alertas').select('*').eq('empresa',_empresa).limit(10000),
+      SB.from('custos').select('*').eq('empresa',_empresa).limit(10000)
     ]));
     var ros=res[0],rcs=res[1],rprovs=res[2],rtabsrv=res[3],rrecibos=res[4],ralertas=res[5],rcustos=res[6];
     // helper: injeta empresa em array antes de upsert
@@ -1068,7 +1068,7 @@ async function loadData(){
       });
       if(toSync.length>0){
         await SB.from('casas').upsert(_inj(toSync),{onConflict:'num'});
-        var fresh=await SB.from('casas').select('*').eq('empresa',_empresa);
+        var fresh=await SB.from('casas').select('*').eq('empresa',_empresa).limit(10000);
         if(fresh.data&&fresh.data.length>0){CS.length=0;CS.push(...fresh.data);}
         else{CS.length=0;CS.push(...rcs.data);}
       } else {
@@ -2462,8 +2462,8 @@ async function reVincularOSTodas(){
   try{
     // Busca todas as OS e todas as casas sem filtro de empresa
     var [rOS,rCS]=await Promise.all([
-      SB.from('ordens_servico').select('*'),
-      SB.from('casas').select('*')
+      SB.from('ordens_servico').select('*').limit(10000),
+      SB.from('casas').select('*').limit(10000)
     ]);
     if(rOS.error||rCS.error){
       hideLoadingScreen();
