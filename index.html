@@ -2271,19 +2271,26 @@ async function resetarVinculosCasas(){
   if(!confirm('Zerar casaId de TODAS as OS da empresa '+_empresa+' no Supabase?\n\nOs históricos manuais do Centro de Comando também serão zerados.\nUse "Re-vincular TODAS" depois para re-associar pelo GPS.'))return;
   showLoadingScreen('Zerando vínculos de casas...');
   try{
-    // Zera casaId diretamente no Supabase para toda a empresa (sem depender do OSD)
-    var {error}=await SB.from('ordens_servico').update({casaId:null}).eq('empresa',_empresa);
-    if(error){hideLoadingScreen();alert('Erro ao zerar vínculos:\n'+error.message);return;}
-    // Atualiza memória
+    // Zera casaId diretamente no Supabase para toda a empresa
+    var r1=await SB.from('ordens_servico').update({casaId:null}).eq('empresa',_empresa);
+    if(r1.error){hideLoadingScreen();alert('Erro ao zerar vínculos:\n'+r1.error.message);return;}
+    // Salva CMD_HIST e CMD_HIST2 vazios no Supabase com await (evita reload restaurar dados antigos)
+    var emptyHist=[
+      {id:_empresa+'_cmd_hist',empresa:_empresa,chave:'cmd_hist',valor:{}},
+      {id:_empresa+'_cmd_hist2',empresa:_empresa,chave:'cmd_hist2',valor:{}}
+    ];
+    var r2=await SB.from('lta_config').upsert(emptyHist);
+    if(r2.error)console.warn('resetarVinculosCasas: lta_config upsert falhou',r2.error);
+    // Limpa memória e localStorage
     OSD.forEach(function(o){o.casaId=null;});
-    // Limpa históricos manuais do Centro de Comando (CMD_HIST e CMD_HIST2)
     Object.keys(CMD_HIST).forEach(function(k){delete CMD_HIST[k];});
     Object.keys(CMD_HIST2).forEach(function(k){delete CMD_HIST2[k];});
-    cmdSaveHist();
-    cmdSaveHist2();
+    localStorage.setItem('lta_cmd_hist','{}');
+    localStorage.setItem('lta_cmd_hist2','{}');
     hideLoadingScreen();
-    alert('✓ casaId zerado em todas as OS e históricos manuais limpos.\nAgora use "Re-vincular TODAS" para re-associar pelo GPS.');
+    alert('✓ casaId zerado, históricos manuais limpos (banco + localStorage).\nAgora use "Re-vincular TODAS" para re-associar pelo GPS.');
     rOST();rDash();rCentroComando();
+    if(sCasa)selC(sCasa);
   }catch(e){hideLoadingScreen();alert('Erro: '+e.message);}
 }
 
@@ -2762,7 +2769,7 @@ function rCL(q=''){
   const fl=sortCasas(filtered,_cSort);
   renderCasasSortBtns();
   document.getElementById('clist').innerHTML=fl.map(c=>{
-    const osOk=OSD.filter(o=>o.st==='completed'&&osVinc(o,c));
+    const osOk=OSD.filter(o=>o.st==='completed'&&Number(o.casaId)===Number(c.id));
     const ck=norm(c.en);let cid='';
     if(ck.includes('macae')||ck.includes('macaé'))cid='Macaé';
     else if(ck.includes('campos'))cid='Campos dos Goytacazes';
@@ -2777,7 +2784,7 @@ function rCL(q=''){
 }
 function selC(id){
   sCasa=id;var c=CS.find(function(x){return x.id===id;});
-  var osRel=OSD.filter(function(o){return osVinc(o,c);});
+  var osRel=OSD.filter(function(o){return Number(o.casaId)===Number(id);});
   var osOk=osRel.filter(function(o){return o.st==='completed';});
   var totRec=osOk.reduce(function(s,o){return s+o.vl;},0);
   var ultima=osOk.slice().sort(function(a,b){return new Date(b.dt)-new Date(a.dt);})[0];
