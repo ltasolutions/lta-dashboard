@@ -1022,18 +1022,31 @@ window.sbRestaurar=async function(){
 };
 // ── END CONFIG SUPABASE ───────────────────────────────────────────────────────
 
+// Busca todas as linhas de uma tabela sem limite — pagina de 1000 em 1000 até acabar
+async function _sbFetchAll(queryFn){
+  var PAGE=1000,all=[],page=0;
+  while(true){
+    var {data,error}=await queryFn().range(page*PAGE,(page+1)*PAGE-1);
+    if(error)return{data:all,error};
+    all=all.concat(data||[]);
+    if(!data||data.length<PAGE)break;
+    page++;
+  }
+  return{data:all,error:null};
+}
+
 async function loadData(){
   var _t=function(p){return Promise.race([p,new Promise((_,r)=>setTimeout(()=>r(new Error('timeout')),18000))]);};
   var _sbStats={os:0,cs:0,provs:0,tabsrv:0,fromSB:false,erro:''};
   try{
     var res=await _t(Promise.all([
-      SB.from('ordens_servico').select('*').eq('empresa',_empresa).limit(10000),
-      SB.from('casas').select('*').eq('empresa',_empresa).limit(10000),
-      SB.from('prestadores').select('*').eq('empresa',_empresa).limit(10000),
-      SB.from('tabela_servicos').select('*').eq('empresa',_empresa).limit(10000),
-      SB.from('recibos').select('*').eq('empresa',_empresa).limit(10000),
-      SB.from('alertas').select('*').eq('empresa',_empresa).limit(10000),
-      SB.from('custos').select('*').eq('empresa',_empresa).limit(10000)
+      _sbFetchAll(()=>SB.from('ordens_servico').select('*').eq('empresa',_empresa)),
+      _sbFetchAll(()=>SB.from('casas').select('*').eq('empresa',_empresa)),
+      _sbFetchAll(()=>SB.from('prestadores').select('*').eq('empresa',_empresa)),
+      _sbFetchAll(()=>SB.from('tabela_servicos').select('*').eq('empresa',_empresa)),
+      _sbFetchAll(()=>SB.from('recibos').select('*').eq('empresa',_empresa)),
+      _sbFetchAll(()=>SB.from('alertas').select('*').eq('empresa',_empresa)),
+      _sbFetchAll(()=>SB.from('custos').select('*').eq('empresa',_empresa))
     ]));
     var ros=res[0],rcs=res[1],rprovs=res[2],rtabsrv=res[3],rrecibos=res[4],ralertas=res[5],rcustos=res[6];
     // helper: injeta empresa em array antes de upsert
@@ -1068,7 +1081,7 @@ async function loadData(){
       });
       if(toSync.length>0){
         await SB.from('casas').upsert(_inj(toSync),{onConflict:'num'});
-        var fresh=await SB.from('casas').select('*').eq('empresa',_empresa).limit(10000);
+        var fresh=await _sbFetchAll(()=>SB.from('casas').select('*').eq('empresa',_empresa));
         if(fresh.data&&fresh.data.length>0){CS.length=0;CS.push(...fresh.data);}
         else{CS.length=0;CS.push(...rcs.data);}
       } else {
@@ -2462,8 +2475,8 @@ async function reVincularOSTodas(){
   try{
     // Busca todas as OS e todas as casas sem filtro de empresa
     var [rOS,rCS]=await Promise.all([
-      SB.from('ordens_servico').select('*').limit(10000),
-      SB.from('casas').select('*').limit(10000)
+      _sbFetchAll(()=>SB.from('ordens_servico').select('*')),
+      _sbFetchAll(()=>SB.from('casas').select('*'))
     ]);
     if(rOS.error||rCS.error){
       hideLoadingScreen();
