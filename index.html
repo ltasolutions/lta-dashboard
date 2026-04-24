@@ -1459,6 +1459,7 @@ function cmdCellClick(casaId,svcIdx){
   var c=CS.find(function(x){return Number(x.id)===Number(casaId);});
   if(!c)return;
   var total=cmdGetCount(casaId,svcIdx);
+  var hist1Entry=CMD_HIST[String(casaId)]&&CMD_HIST[String(casaId)][String(svcIdx)];
   var hist2Entry=CMD_HIST2[String(casaId)]&&CMD_HIST2[String(casaId)][String(svcIdx)];
   var today=new Date().toISOString().split('T')[0];
   var header='<div style="font-size:11px;color:#71717a;margin-bottom:4px">Casa '+c.num+' — '+esc(c.mr)+'</div>'
@@ -1478,12 +1479,14 @@ function cmdCellClick(casaId,svcIdx){
       +'<input id="cmd-dt-inp" type="date" value="'+today+'"/></div>'
       +'<div style="display:flex;gap:8px;margin-top:16px">'
       +'<button onclick="cmdSaveManual('+casaId+','+svcIdx+',2)" style="flex:1;background:#ef4444;color:#fff;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:700;cursor:pointer">✓ Registrar 2º</button>'
+      +(hist1Entry?'<button onclick="cmdClearManual('+casaId+','+svcIdx+',1)" style="background:#27272a;color:#f87171;border:1px solid #3f3f46;border-radius:8px;padding:10px 14px;font-size:13px;cursor:pointer">✕ Remover</button>':'')
       +'<button onclick="closeModal()" style="background:#27272a;color:#a1a1aa;border:1px solid #3f3f46;border-radius:8px;padding:10px 14px;font-size:13px;cursor:pointer">Cancelar</button>'
       +'</div>');
   } else {
     openModal(header
       +'<div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:8px 12px;font-size:11px;color:#f87171;margin-bottom:14px">2 serviços registrados — máximo atingido</div>'
       +'<div style="display:flex;gap:8px;margin-top:16px">'
+      +(hist1Entry?'<button onclick="cmdClearManual('+casaId+','+svcIdx+',1)" style="flex:1;background:#27272a;color:#f87171;border:1px solid #3f3f46;border-radius:8px;padding:10px;font-size:13px;cursor:pointer">✕ Remover 1º</button>':'')
       +(hist2Entry?'<button onclick="cmdClearManual('+casaId+','+svcIdx+',2)" style="flex:1;background:#27272a;color:#f87171;border:1px solid #3f3f46;border-radius:8px;padding:10px;font-size:13px;cursor:pointer">✕ Remover 2º</button>':'')
       +'<button onclick="closeModal()" style="background:#27272a;color:#a1a1aa;border:1px solid #3f3f46;border-radius:8px;padding:10px 14px;font-size:13px;cursor:pointer">Fechar</button>'
       +'</div>');
