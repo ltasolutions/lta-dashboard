@@ -1228,9 +1228,7 @@ var _origSBSaved=null; // guarda o SB da LTA enquanto admin está em outro tenan
 // TENANTS: empresas que o admin@ltasolutions.com pode acessar pelo switcher.
 // Preencher quando o Supabase de cada empresa estiver configurado.
 // Modelo: {id:'id', name:'Nome', email:'admin@empresa.com', pass:'senha', sbUrl:'https://XXX.supabase.co', sbKey:'ANON_KEY'}
-var TENANTS=[
-  {id:'filial1',name:'FILIAL 1',email:'lta@solutions.com',pass:'Lta@2026!',sbUrl:SB_URL,sbKey:SB_KEY}
-];
+var TENANTS=[];
 
 // ══ ALERTAS DE DUPLICATA ═══════════════════════════════════════════════════
 // Cada alerta: {id, os, sv, tv, values, status: 'pending'|'resolved', resolucao: ''|'manter'|'remover_x'}
